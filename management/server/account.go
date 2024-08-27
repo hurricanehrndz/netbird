@@ -161,7 +161,7 @@ type DefaultAccountManager struct {
 	eventStore           activity.Store
 	geo                  *geolocation.Geolocation
 
-	cache *AccountCache
+	requestBuffer *AccountRequestBuffer
 
 	// singleAccountMode indicates whether the instance has a single account.
 	// If true, then every new user will end up under the same account.
@@ -476,6 +476,12 @@ func (a *Account) GetPeerNetworkMap(
 		objectCount := int64(len(peersToConnect) + len(expiredPeers) + len(routesUpdate) + len(firewallRules))
 		metrics.CountNetworkMapObjects(objectCount)
 		metrics.CountGetPeerNetworkMapDuration(time.Since(start))
+
+		if objectCount > 5000 {
+			log.WithContext(ctx).Tracef("account: %s has a total resource count of %d objects, "+
+				"peers to connect: %d, expired peers: %d, routes: %d, firewall rules: %d",
+				a.Id, objectCount, len(peersToConnect), len(expiredPeers), len(routesUpdate), len(firewallRules))
+		}
 	}
 
 	return nm
@@ -969,7 +975,7 @@ func BuildManager(
 		userDeleteFromIDPEnabled: userDeleteFromIDPEnabled,
 		integratedPeerValidator:  integratedPeerValidator,
 		metrics:                  metrics,
-		cache:                    NewAccountCache(ctx, store),
+		requestBuffer:            NewAccountRequestBuffer(ctx, store),
 	}
 	allAccounts := store.GetAllAccounts(ctx)
 	// enable single account mode only if configured by user and number of existing accounts is not grater than 1
