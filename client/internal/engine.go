@@ -1126,6 +1126,7 @@ func (e *Engine) close() {
 		if err := e.wgInterface.Close(); err != nil {
 			log.Errorf("failed closing Netbird interface %s %v", e.config.WgIfaceName, err)
 		}
+		e.wgInterface = nil
 	}
 
 	if !isNil(e.sshServer) {
@@ -1357,16 +1358,13 @@ func (e *Engine) probeTURNs() []relay.ProbeResult {
 }
 
 func (e *Engine) restartEngine() {
-	log.Info("restarting engine")
-	CtxGetState(e.ctx).Set(StatusConnecting)
-
 	if err := e.Stop(); err != nil {
 		log.Errorf("Failed to stop engine: %v", err)
 	}
 
-	_ = CtxGetState(e.ctx).Wrap(ErrResetConnection)
-	log.Infof("cancelling client, engine will be recreated")
-	e.clientCancel()
+	if err := e.Start(); err != nil {
+		log.Errorf("Failed to start engine: %v", err)
+	}
 }
 
 func (e *Engine) startNetworkMonitor() {

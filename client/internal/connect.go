@@ -258,6 +258,13 @@ func (c *ConnectClient) run(
 
 		peerConfig := loginResp.GetPeerConfig()
 
+		if c.engine != nil && c.engine.wgInterfaceCreate != nil {
+			log.Info("Stopping Netbird Engine")
+			err := c.engine.Stop()
+			if err != nil {
+				log.Error("Failed to stop existing Netbird Engine")
+			}
+		}
 		engineConfig, err := createEngineConfig(myPrivateKey, c.config, peerConfig)
 		if err != nil {
 			log.Error(err)
@@ -267,12 +274,7 @@ func (c *ConnectClient) run(
 		checks := loginResp.GetChecks()
 
 		c.engineMutex.Lock()
-		if c.engine != nil && c.engine.ctx.Err() != nil {
-			log.Info("Stopping Netbird Engine")
-			c.engine.Stop()
-		}
 		c.engine = NewEngineWithProbes(engineCtx, cancel, signalClient, mgmClient, relayManager, engineConfig, mobileDependency, c.statusRecorder, probes, checks)
-
 		c.engineMutex.Unlock()
 
 		if err := c.engine.Start(); err != nil {
