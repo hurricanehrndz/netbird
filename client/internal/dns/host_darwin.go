@@ -212,6 +212,7 @@ func (s *systemConfigurator) getSystemDNSSettings() (SystemDNSSettings, error) {
 	}
 
 	var dnsSettings SystemDNSSettings
+	localDomains := make(map[string]struct{})
 	inSearchDomainsArray := false
 	inServerAddressesArray := false
 
@@ -221,7 +222,8 @@ func (s *systemConfigurator) getSystemDNSSettings() (SystemDNSSettings, error) {
 		switch {
 		case strings.HasPrefix(line, "DomainName :"):
 			domainName := strings.TrimSpace(strings.Split(line, ":")[1])
-			dnsSettings.Domains = append(dnsSettings.Domains, domainName)
+			localDomains[domainName] = struct{}{}
+
 		case line == "SearchDomains : <array> {":
 			inSearchDomainsArray = true
 			continue
@@ -235,7 +237,7 @@ func (s *systemConfigurator) getSystemDNSSettings() (SystemDNSSettings, error) {
 
 		if inSearchDomainsArray {
 			searchDomain := strings.Split(line, " : ")[1]
-			dnsSettings.Domains = append(dnsSettings.Domains, searchDomain)
+			localDomains[string(searchDomain)] = struct{}{}
 		} else if inServerAddressesArray {
 			address := strings.Split(line, " : ")[1]
 			if ip, err := netip.ParseAddr(address); err == nil && ip.Is4() {
@@ -247,6 +249,11 @@ func (s *systemConfigurator) getSystemDNSSettings() (SystemDNSSettings, error) {
 
 	if err := scanner.Err(); err != nil {
 		return dnsSettings, err
+	}
+
+	dnsSettings.Domains = make([]string, 0, len(localDomains))
+	for k := range localDomains {
+		dnsSettings.Domains = append(dnsSettings.Domains, k)
 	}
 
 	// default to 53 port
