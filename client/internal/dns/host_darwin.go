@@ -166,7 +166,7 @@ func (s *systemConfigurator) removeKeyFromSystemConfig(key string) error {
 }
 
 func (s *systemConfigurator) addLocalDNS() error {
-	if !s.systemDNSSettings.ServerIP.IsValid() || len(s.systemDNSSettings.Domains) == 0 {
+	if len(s.systemDNSSettings.ServerIPs) == 0 || len(s.systemDNSSettings.Domains) == 0 {
 		if err := s.recordSystemDNSSettings(true); err != nil {
 			log.Errorf("Unable to get system DNS configuration")
 			return fmt.Errorf("recordSystemDNSSettings(): %w", err)
@@ -243,7 +243,9 @@ func (s *systemConfigurator) getSystemDNSSettings() (SystemDNSSettings, error) {
 		} else if inServerAddressesArray {
 			address := strings.Split(line, " : ")[1]
 			if ip, err := netip.ParseAddr(address); err == nil && ip.Is4() {
-				dnsSettings.ServerIPs = append(dnsSettings.ServerIPs, ip)
+				if ip.IsValid() {
+					dnsSettings.ServerIPs = append(dnsSettings.ServerIPs, ip.Unmap())
+				}
 				inServerAddressesArray = false // Stop reading after finding the first IPv4 address
 			}
 		}
