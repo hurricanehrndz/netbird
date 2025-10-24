@@ -238,7 +238,7 @@ func (s *systemConfigurator) getSystemDNSSettings() (SystemDNSSettings, error) {
 
 		if inSearchDomainsArray {
 			searchDomain := strings.Split(line, " : ")[1]
-			localDomains[string(searchDomain)] = struct{}{}
+			localDomains[searchDomain] = struct{}{}
 		} else if inServerAddressesArray {
 			address := strings.Split(line, " : ")[1]
 			if ip, err := netip.ParseAddr(address); err == nil && ip.Is4() {
