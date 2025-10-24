@@ -295,10 +295,12 @@ func (s *systemConfigurator) addDNSState(state, domains string, dnsServers []net
 		noSearch = "0"
 	}
 
-	serversStr := ""
+	var serversBuilder strings.Builder
 	for _, serverIP := range dnsServers {
-		serversStr = serversStr + serverIP.String() + " "
+		serversBuilder.WriteString(serverIP.String())
+		serversBuilder.WriteString(" ")
 	}
+	serversStr := serversBuilder.String()
 	lines := buildAddCommandLine(keySupplementalMatchDomains, arraySymbol+domains)
 	lines += buildAddCommandLine(keySupplementalMatchDomainsNoSearch, digitSymbol+noSearch)
 	lines += buildAddCommandLine(keyServerAddresses, arraySymbol+serversStr)
