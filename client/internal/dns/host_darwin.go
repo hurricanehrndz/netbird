@@ -242,9 +242,7 @@ func (s *systemConfigurator) getSystemDNSSettings() (SystemDNSSettings, error) {
 		} else if inServerAddressesArray {
 			address := strings.Split(line, " : ")[1]
 			if ip, err := netip.ParseAddr(address); err == nil && ip.Is4() {
-				if ip.IsValid() {
-					dnsSettings.ServerIPs = append(dnsSettings.ServerIPs, ip)
-				}
+				dnsSettings.ServerIPs = append(dnsSettings.ServerIPs, ip)
 				inServerAddressesArray = false // Stop reading after finding the first IPv4 address
 			}
 		}
