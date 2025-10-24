@@ -18,6 +18,7 @@ import (
 	"github.com/skratchdot/open-golang/open"
 
 	"github.com/netbirdio/netbird/client/internal"
+	"github.com/netbirdio/netbird/client/internal/profilemanager"
 	"github.com/netbirdio/netbird/client/proto"
 	nbstatus "github.com/netbirdio/netbird/client/status"
 	uptypes "github.com/netbirdio/netbird/upload-server/types"
@@ -395,12 +396,12 @@ func (s *serviceClient) configureServiceForDebug(
 	time.Sleep(time.Second)
 
 	if enablePersistence {
-		if _, err := conn.SetNetworkMapPersistence(s.ctx, &proto.SetNetworkMapPersistenceRequest{
+		if _, err := conn.SetSyncResponsePersistence(s.ctx, &proto.SetSyncResponsePersistenceRequest{
 			Enabled: true,
 		}); err != nil {
-			return fmt.Errorf("enable network map persistence: %v", err)
+			return fmt.Errorf("enable sync response persistence: %v", err)
 		}
-		log.Info("Network map persistence enabled for debug")
+		log.Info("Sync response persistence enabled for debug")
 	}
 
 	if _, err := conn.Up(s.ctx, &proto.UpRequest{}); err != nil {
@@ -426,6 +427,12 @@ func (s *serviceClient) collectDebugData(
 		return "", err
 	}
 
+	pm := profilemanager.NewProfileManager()
+	var profName string
+	if activeProf, err := pm.GetActiveProfile(); err == nil {
+		profName = activeProf.Name
+	}
+
 	postUpStatus, err := conn.Status(s.ctx, &proto.StatusRequest{GetFullPeerStatus: true})
 	if err != nil {
 		log.Warnf("Failed to get post-up status: %v", err)
@@ -433,7 +440,7 @@ func (s *serviceClient) collectDebugData(
 
 	var postUpStatusOutput string
 	if postUpStatus != nil {
-		overview := nbstatus.ConvertToStatusOutputOverview(postUpStatus, params.anonymize, "", nil, nil, nil, "", "")
+		overview := nbstatus.ConvertToStatusOutputOverview(postUpStatus, params.anonymize, "", nil, nil, nil, "", profName)
 		postUpStatusOutput = nbstatus.ParseToFullDetailSummary(overview)
 	}
 	headerPostUp := fmt.Sprintf("----- NetBird post-up - Timestamp: %s", time.Now().Format(time.RFC3339))
@@ -450,7 +457,7 @@ func (s *serviceClient) collectDebugData(
 
 	var preDownStatusOutput string
 	if preDownStatus != nil {
-		overview := nbstatus.ConvertToStatusOutputOverview(preDownStatus, params.anonymize, "", nil, nil, nil, "", "")
+		overview := nbstatus.ConvertToStatusOutputOverview(preDownStatus, params.anonymize, "", nil, nil, nil, "", profName)
 		preDownStatusOutput = nbstatus.ParseToFullDetailSummary(overview)
 	}
 	headerPreDown := fmt.Sprintf("----- NetBird pre-down - Timestamp: %s - Duration: %s",
@@ -574,6 +581,12 @@ func (s *serviceClient) createDebugBundle(anonymize bool, systemInfo bool, uploa
 		return nil, fmt.Errorf("get client: %v", err)
 	}
 
+	pm := profilemanager.NewProfileManager()
+	var profName string
+	if activeProf, err := pm.GetActiveProfile(); err == nil {
+		profName = activeProf.Name
+	}
+
 	statusResp, err := conn.Status(s.ctx, &proto.StatusRequest{GetFullPeerStatus: true})
 	if err != nil {
 		log.Warnf("failed to get status for debug bundle: %v", err)
@@ -581,7 +594,7 @@ func (s *serviceClient) createDebugBundle(anonymize bool, systemInfo bool, uploa
 
 	var statusOutput string
 	if statusResp != nil {
-		overview := nbstatus.ConvertToStatusOutputOverview(statusResp, anonymize, "", nil, nil, nil, "", "")
+		overview := nbstatus.ConvertToStatusOutputOverview(statusResp, anonymize, "", nil, nil, nil, "", profName)
 		statusOutput = nbstatus.ParseToFullDetailSummary(overview)
 	}
 

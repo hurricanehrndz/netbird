@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"runtime"
 	"strings"
@@ -31,7 +32,8 @@ func init() {
 
 var loginCmd = &cobra.Command{
 	Use:   "login",
-	Short: "login to the Netbird Management Service (first run)",
+	Short: "Log in to the NetBird network",
+	Long:  "Log in to the NetBird network using a setup key or SSO",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := setEnvAndFlags(cmd); err != nil {
 			return fmt.Errorf("set env and flags: %v", err)
@@ -226,7 +228,7 @@ func doForegroundLogin(ctx context.Context, cmd *cobra.Command, setupKey string,
 	}
 
 	// update host's static platform and system information
-	system.UpdateStaticInfo()
+	system.UpdateStaticInfoAsync()
 
 	configFilePath, err := activeProf.FilePath()
 	if err != nil {
@@ -355,11 +357,19 @@ func openURL(cmd *cobra.Command, verificationURIComplete, userCode string, noBro
 	cmd.Println("")
 
 	if !noBrowser {
-		if err := open.Run(verificationURIComplete); err != nil {
+		if err := openBrowser(verificationURIComplete); err != nil {
 			cmd.Println("\nAlternatively, you may want to use a setup key, see:\n\n" +
 				"https://docs.netbird.io/how-to/register-machines-using-setup-keys")
 		}
 	}
+}
+
+// openBrowser opens the URL in a browser, respecting the BROWSER environment variable.
+func openBrowser(url string) error {
+	if browser := os.Getenv("BROWSER"); browser != "" {
+		return exec.Command(browser, url).Start()
+	}
+	return open.Run(url)
 }
 
 // isUnixRunningDesktop checks if a Linux OS is running desktop environment

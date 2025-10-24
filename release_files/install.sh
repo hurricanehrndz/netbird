@@ -29,6 +29,8 @@ if [ -z ${NETBIRD_RELEASE+x} ]; then
     NETBIRD_RELEASE=latest
 fi
 
+TAG_NAME=""
+
 get_release() {
     local RELEASE=$1
     if [ "$RELEASE" = "latest" ]; then
@@ -38,17 +40,19 @@ get_release() {
         local TAG="tags/${RELEASE}"
         local URL="https://api.github.com/repos/${OWNER}/${REPO}/releases/${TAG}"
     fi
+	OUTPUT=""
     if [ -n "$GITHUB_TOKEN" ]; then
-          curl -H  "Authorization: token ${GITHUB_TOKEN}" -s "${URL}" \
-              | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'
+          OUTPUT=$(curl -H  "Authorization: token ${GITHUB_TOKEN}" -s "${URL}")
     else
-          curl -s "${URL}" \
-              | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'
+          OUTPUT=$(curl -s "${URL}") 
     fi
+	TAG_NAME=$(echo ${OUTPUT} |  grep -Eo '\"tag_name\":\s*\"v([0-9]+\.){2}[0-9]+"' | tail -n 1)
+	echo "${TAG_NAME}" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+'
 }
 
 download_release_binary() {
     VERSION=$(get_release "$NETBIRD_RELEASE")
+	echo "Using the following tag name for binary installation: ${TAG_NAME}"
     BASE_URL="https://github.com/${OWNER}/${REPO}/releases/download"
     BINARY_BASE_NAME="${VERSION#v}_${OS_TYPE}_${ARCH}.tar.gz"
 
@@ -128,36 +132,6 @@ gpgcheck=0
 gpgkey=https://pkgs.netbird.io/yum/repodata/repomd.xml.key
 repo_gpgcheck=1
 EOF
-}
-
-install_aur_package() {
-    INSTALL_PKGS="git base-devel go"
-    REMOVE_PKGS=""
-
-    # Check if dependencies are installed
-    for PKG in $INSTALL_PKGS; do
-        if ! pacman -Q "$PKG" > /dev/null 2>&1; then
-            # Install missing package(s)
-            ${SUDO} pacman -S "$PKG" --noconfirm
-
-            # Add installed package for clean up later
-            REMOVE_PKGS="$REMOVE_PKGS $PKG"
-        fi
-    done
-
-    # Build package from AUR
-    cd /tmp && git clone https://aur.archlinux.org/netbird.git
-    cd netbird && makepkg -sri --noconfirm
-
-    if ! $SKIP_UI_APP; then
-        cd /tmp && git clone https://aur.archlinux.org/netbird-ui.git
-        cd netbird-ui && makepkg -sri --noconfirm
-    fi
-
-    if [ -n "$REMOVE_PKGS" ]; then
-      # Clean up the installed packages
-      ${SUDO} pacman -Rs "$REMOVE_PKGS" --noconfirm
-    fi
 }
 
 prepare_tun_module() {
@@ -276,12 +250,9 @@ install_netbird() {
         if ! $SKIP_UI_APP; then
             ${SUDO} rpm-ostree -y install netbird-ui
         fi
-    ;;
-    pacman)
-        ${SUDO} pacman -Syy
-        install_aur_package
-        # in-line with the docs at https://wiki.archlinux.org/title/Netbird
-        ${SUDO} systemctl enable --now netbird@main.service
+        # ensure the service is started after install
+         ${SUDO} netbird service install || true
+         ${SUDO} netbird service start || true
     ;;
     pkg)
         # Check if the package is already installed
@@ -458,11 +429,7 @@ if type uname >/dev/null 2>&1; then
               elif [ -x "$(command -v yum)" ]; then
                   PACKAGE_MANAGER="yum"
                   echo "The installation will be performed using yum package manager"
-              elif [ -x "$(command -v pacman)" ]; then
-                  PACKAGE_MANAGER="pacman"
-                  echo "The installation will be performed using pacman package manager"
               fi
-
             else
               echo "Unable to determine OS type from /etc/os-release"
               exit 1
