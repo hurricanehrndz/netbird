@@ -85,7 +85,7 @@ func (s *systemConfigurator) applyDNSConfig(config HostDNSConfig, stateManager *
 		searchDomains = append(searchDomains, strings.TrimSuffix(""+dConf.Domain, "."))
 	}
 
-	configServerIPs := []netip.Addr { config.ServerIP }
+	configServerIPs := []netip.Addr{config.ServerIP}
 	matchKey := getKeyWithInput(netbirdDNSStateKeyFormat, matchSuffix)
 	if len(matchDomains) != 0 {
 		err = s.addMatchDomains(matchKey, strings.Join(matchDomains, " "), configServerIPs, config.ServerPort)
