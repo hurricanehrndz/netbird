@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"syscall"
 	"unsafe"
 
@@ -16,11 +17,18 @@ import (
 	"github.com/netbirdio/netbird/client/internal/routemanager/systemops"
 )
 
+type nexthopPair struct {
+	V4 systemops.Nexthop
+	V6 systemops.Nexthop
+}
+
 func prepareFd() (int, error) {
 	return unix.Socket(syscall.AF_ROUTE, syscall.SOCK_RAW, syscall.AF_UNSPEC)
 }
 
 func routeCheck(ctx context.Context, fd int, nexthopv4, nexthopv6 systemops.Nexthop) error {
+	expectedNexthops := nexthopPair{V4: nexthopv4, V6: nexthopv6}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -41,36 +49,41 @@ func routeCheck(ctx context.Context, fd int, nexthopv4, nexthopv6 systemops.Next
 
 			msg := (*unix.RtMsghdr)(unsafe.Pointer(&buf[0]))
 
-			switch msg.Type {
-			// handle route changes
-			case unix.RTM_ADD, syscall.RTM_DELETE:
+			isRouteChange := msg.Type == syscall.RTM_CHANGE || msg.Type == syscall.RTM_ADD || msg.Type == syscall.RTM_DELETE
+
+			if isRouteChange {
 				route, err := parseRouteMessage(buf[:n])
 				if err != nil {
 					log.Debugf("Network monitor: error parsing routing message: %v", err)
 					continue
 				}
-
-				if route.Dst.Bits() != 0 {
+				isDefaultRoute := route.Dst.Bits() == 0
+				if !isDefaultRoute {
 					continue
 				}
-
-				intf := "<nil>"
-				if route.Interface != nil {
-					intf = route.Interface.Name
-				}
-				switch msg.Type {
-				case unix.RTM_ADD:
-					log.Infof("Network monitor: default route changed: via %s, interface %s", route.Gw, intf)
+				if hasDefaultRouteChanged(expectedNexthops) {
 					return nil
-				case unix.RTM_DELETE:
-					if nexthopv4.Intf != nil && route.Gw.Compare(nexthopv4.IP) == 0 || nexthopv6.Intf != nil && route.Gw.Compare(nexthopv6.IP) == 0 {
-						log.Infof("Network monitor: default route removed: via %s, interface %s", route.Gw, intf)
-						return nil
-					}
 				}
 			}
 		}
 	}
+}
+
+func hasDefaultRouteChanged(expectedNexthops nexthopPair) bool {
+	actualNexthopv4, errv4 := systemops.GetNextHop(netip.IPv4Unspecified())
+	actualNexthopv6, errv6 := systemops.GetNextHop(netip.IPv6Unspecified())
+	if errv4 != nil || errv6 != nil {
+		err := errors.Join(errv4, errv6)
+		log.Infof("Network monitor: failed to check next hop, assuming no network connection available: %s", err)
+		return true
+	}
+
+	if !expectedNexthops.V4.Equal(actualNexthopv4) || !expectedNexthops.V6.Equal(actualNexthopv6) {
+		log.Infof("Network monitor: default route changed v4: %s -> %s", expectedNexthops.V4, actualNexthopv4)
+		log.Infof("Network monitor: default route changed v6: %s -> %s", expectedNexthops.V6, actualNexthopv6)
+		return true
+	}
+	return false
 }
 
 func parseRouteMessage(buf []byte) (*systemops.Route, error) {
