@@ -185,30 +185,6 @@ func showErrorMessage(msg string) {
 	a.Run()
 }
 
-//go:embed assets/netbird-systemtray-connected-macos.png
-var iconConnectedMacOS []byte
-
-//go:embed assets/netbird-systemtray-disconnected-macos.png
-var iconDisconnectedMacOS []byte
-
-//go:embed assets/netbird-systemtray-update-disconnected-macos.png
-var iconUpdateDisconnectedMacOS []byte
-
-//go:embed assets/netbird-systemtray-update-connected-macos.png
-var iconUpdateConnectedMacOS []byte
-
-//go:embed assets/netbird-systemtray-connecting-macos.png
-var iconConnectingMacOS []byte
-
-//go:embed assets/netbird-systemtray-error-macos.png
-var iconErrorMacOS []byte
-
-//go:embed assets/connected.png
-var iconConnectedDot []byte
-
-//go:embed assets/disconnected.png
-var iconDisconnectedDot []byte
-
 type serviceClient struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -408,15 +384,15 @@ func (s *serviceClient) updateIcon() {
 	s.updateIndicationLock.Lock()
 	if s.connected {
 		if s.isUpdateIconActive {
-			systray.SetTemplateIcon(iconUpdateConnectedMacOS, s.icUpdateConnected)
+			systray.SetTemplateIcon(s.icUpdateConnected, s.icUpdateConnected)
 		} else {
-			systray.SetTemplateIcon(iconConnectedMacOS, s.icConnected)
+			systray.SetTemplateIcon(s.icConnected, s.icConnected)
 		}
 	} else {
 		if s.isUpdateIconActive {
-			systray.SetTemplateIcon(iconUpdateDisconnectedMacOS, s.icUpdateDisconnected)
+			systray.SetTemplateIcon(s.icUpdateDisconnected, s.icUpdateDisconnected)
 		} else {
-			systray.SetTemplateIcon(iconDisconnectedMacOS, s.icDisconnected)
+			systray.SetTemplateIcon(s.icDisconnected, s.icDisconnected)
 		}
 	}
 	s.updateIndicationLock.Unlock()
@@ -817,10 +793,10 @@ func (s *serviceClient) handleSSOLogin(ctx context.Context, loginResp *proto.Log
 }
 
 func (s *serviceClient) menuUpClick(ctx context.Context) error {
-	systray.SetTemplateIcon(iconConnectingMacOS, s.icConnecting)
+	systray.SetTemplateIcon(s.icConnecting, s.icConnecting)
 	conn, err := s.getSrvClient(defaultFailTimeout)
 	if err != nil {
-		systray.SetTemplateIcon(iconErrorMacOS, s.icError)
+		systray.SetTemplateIcon(s.icError, s.icError)
 		return fmt.Errorf("get daemon client: %w", err)
 	}
 
@@ -846,7 +822,7 @@ func (s *serviceClient) menuUpClick(ctx context.Context) error {
 }
 
 func (s *serviceClient) menuDownClick() error {
-	systray.SetTemplateIcon(iconConnectingMacOS, s.icConnecting)
+	systray.SetTemplateIcon(s.icConnecting, s.icConnecting)
 	conn, err := s.getSrvClient(defaultFailTimeout)
 	if err != nil {
 		return fmt.Errorf("get daemon client: %w", err)
@@ -914,9 +890,9 @@ func (s *serviceClient) updateStatus() error {
 			s.isUpdateIconActive = s.update.SetDaemonVersion(status.DaemonVersion)
 			if !s.isUpdateIconActive {
 				if systrayIconState {
-					systray.SetTemplateIcon(iconConnectedMacOS, s.icConnected)
+					systray.SetTemplateIcon(s.icConnected, s.icConnected)
 				} else {
-					systray.SetTemplateIcon(iconDisconnectedMacOS, s.icDisconnected)
+					systray.SetTemplateIcon(s.icDisconnected, s.icDisconnected)
 				}
 			}
 
@@ -946,9 +922,9 @@ func (s *serviceClient) updateStatus() error {
 func (s *serviceClient) setDisconnectedStatus() {
 	s.connected = false
 	if s.isUpdateIconActive {
-		systray.SetTemplateIcon(iconUpdateDisconnectedMacOS, s.icUpdateDisconnected)
+		systray.SetTemplateIcon(s.icUpdateDisconnected, s.icUpdateDisconnected)
 	} else {
-		systray.SetTemplateIcon(iconDisconnectedMacOS, s.icDisconnected)
+		systray.SetTemplateIcon(s.icDisconnected, s.icDisconnected)
 	}
 	systray.SetTooltip("NetBird (Disconnected)")
 	s.mStatus.SetTitle("Disconnected")
@@ -964,9 +940,9 @@ func (s *serviceClient) setConnectedStatus() {
 	s.connected = true
 	s.sendNotification = true
 	if s.isUpdateIconActive {
-		systray.SetTemplateIcon(iconUpdateConnectedMacOS, s.icUpdateConnected)
+		systray.SetTemplateIcon(s.icUpdateConnected, s.icUpdateConnected)
 	} else {
-		systray.SetTemplateIcon(iconConnectedMacOS, s.icConnected)
+		systray.SetTemplateIcon(s.icConnected, s.icConnected)
 	}
 	systray.SetTooltip("NetBird (Connected)")
 	s.mStatus.SetTitle("Connected")
@@ -979,7 +955,7 @@ func (s *serviceClient) setConnectedStatus() {
 
 func (s *serviceClient) setConnectingStatus() {
 	s.connected = false
-	systray.SetTemplateIcon(iconConnectingMacOS, s.icConnecting)
+	systray.SetTemplateIcon(s.icConnecting, s.icConnecting)
 	systray.SetTooltip("NetBird (Connecting)")
 	s.mStatus.SetTitle("Connecting")
 	s.mUp.Disable()
@@ -1019,7 +995,7 @@ func (s *serviceClient) triggerStatusUpdate() {
 }
 
 func (s *serviceClient) onTrayReady() {
-	systray.SetTemplateIcon(iconDisconnectedMacOS, s.icDisconnected)
+	systray.SetTemplateIcon(s.icDisconnected, s.icDisconnected)
 	systray.SetTooltip("NetBird")
 
 	// setup systray menu items
@@ -1497,9 +1473,9 @@ func (s *serviceClient) onUpdateAvailable() {
 	s.isUpdateIconActive = true
 
 	if s.connected {
-		systray.SetTemplateIcon(iconUpdateConnectedMacOS, s.icUpdateConnected)
+		systray.SetTemplateIcon(s.icUpdateConnected, s.icUpdateConnected)
 	} else {
-		systray.SetTemplateIcon(iconUpdateDisconnectedMacOS, s.icUpdateDisconnected)
+		systray.SetTemplateIcon(s.icUpdateConnected, s.icUpdateDisconnected)
 	}
 }
 

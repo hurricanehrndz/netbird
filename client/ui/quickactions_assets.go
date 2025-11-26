@@ -8,14 +8,14 @@ import (
 	"fyne.io/fyne/v2"
 )
 
-//go:embed assets/connected.png
+//go:embed assets/other/connected.png
 var resourceConnectedPngData []byte
 var resourceConnectedPng = &fyne.StaticResource{
 	StaticName:    "assets/connected.png",
 	StaticContent: resourceConnectedPngData,
 }
 
-//go:embed assets/disconnected.png
+//go:embed assets/other/disconnected.png
 var resourceDisconnectedPngData []byte
 var resourceDisconnectedPng = &fyne.StaticResource{
 	StaticName:    "assets/disconnected.png",
