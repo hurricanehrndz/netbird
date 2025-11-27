@@ -38,3 +38,19 @@ var iconConnectedDot []byte
 
 //go:embed assets/mac/disconnected.svg
 var iconDisconnectedDot []byte
+
+//go:embed assets/mac/netbird-systemtray-connecting-frame1-macos.svg
+var iconConnectingFrame1 []byte
+var iconConnectingDarkFrame1  = iconConnectingFrame1
+
+//go:embed assets/mac/netbird-systemtray-connecting-frame2-macos.svg
+var iconConnectingFrame2 []byte
+var iconConnectingDarkFrame2  = iconConnectingFrame2
+
+//go:embed assets/mac/netbird-systemtray-connecting-frame3-macos.svg
+var iconConnectingFrame3 []byte
+var iconConnectingDarkFrame3  = iconConnectingFrame3
+
+//go:embed assets/mac/netbird-systemtray-connecting-frame4-macos.svg
+var iconConnectingFrame4 []byte
+var iconConnectingDarkFrame4  = iconConnectingFrame4

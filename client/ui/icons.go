@@ -50,3 +50,27 @@ var iconConnectedDot []byte
 
 //go:embed assets/other/disconnected.png
 var iconDisconnectedDot []byte
+
+//go:embed assets/other/netbird-systemtray-connecting-frame1.png
+var iconConnectingFrame1 []byte
+
+//go:embed assets/other/netbird-systemtray-connecting-dark-frame2.png
+var iconConnectingDarkFrame1 []byte
+
+//go:embed assets/other/netbird-systemtray-connecting-frame2.png
+var iconConnectingFrame2 []byte
+
+//go:embed assets/other/netbird-systemtray-connecting-dark-frame2.png
+var iconConnectingDarkFrame2 []byte
+
+//go:embed assets/other/netbird-systemtray-connecting-frame3.png
+var iconConnectingFrame3 []byte
+
+//go:embed assets/other/netbird-systemtray-connecting-dark-frame3.png
+var iconConnectingDarkFrame3 []byte
+
+//go:embed assets/other/netbird-systemtray-connecting-frame4.png
+var iconConnectingFrame4 []byte
+
+//go:embed assets/other/netbird-systemtray-connecting-dark-frame4.png
+var iconConnectingDarkFrame4 []byte

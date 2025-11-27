@@ -42,3 +42,27 @@ var iconError []byte
 
 //go:embed assets/win/netbird-systemtray-error-dark.ico
 var iconErrorDark []byte
+
+//go:embed assets/win/netbird-systemtray-connecting-frame1.ico
+var iconConnectingFrame1 []byte
+
+//go:embed assets/win/netbird-systemtray-connecting-dark-frame1.ico
+var iconConnectingDarkFrame1 []byte
+
+//go:embed assets/win/netbird-systemtray-connecting-frame2.ico
+var iconConnectingFrame2 []byte
+
+//go:embed assets/win/netbird-systemtray-connecting-dark-frame2.ico
+var iconConnectingDarkFrame2 []byte
+
+//go:embed assets/win/netbird-systemtray-connecting-frame3.ico
+var iconConnectingFrame3 []byte
+
+//go:embed assets/win/netbird-systemtray-connecting-dark-frame3.ico
+var iconConnectingDarkFrame3 []byte
+
+//go:embed assets/win/netbird-systemtray-connecting-frame4.ico
+var iconConnectingFrame4 []byte
+
+//go:embed assets/win/netbird-systemtray-connecting-dark-frame4.ico
+var iconConnectingDarkFrame4 []byte
