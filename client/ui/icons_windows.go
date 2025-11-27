@@ -43,6 +43,12 @@ var iconError []byte
 //go:embed assets/win/netbird-systemtray-error-dark.ico
 var iconErrorDark []byte
 
+//go:embed assets/win/connected.ico
+var iconConnectedDot []byte
+
+//go:embed assets/win/disconnected.ico
+var iconDisconnectedDot []byte
+
 //go:embed assets/win/netbird-systemtray-connecting-frame1.ico
 var iconConnectingFrame1 []byte
 
