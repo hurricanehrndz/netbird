@@ -812,16 +812,25 @@ func (s *serviceClient) handleSSOLogin(ctx context.Context, loginResp *proto.Log
 
 func (s *serviceClient) menuUpClick(ctx context.Context) error {
 	s.animator.Start()
-	defer s.animator.Stop()
+
+	var hasErrored bool
+	defer func() {
+		if hasErrored {
+			s.animator.Stop()
+			s.connecting = false
+			systray.SetTemplateIcon(s.icError, s.icError)
+		}
+	}()
 
 	conn, err := s.getSrvClient(defaultFailTimeout)
 	if err != nil {
-		systray.SetTemplateIcon(s.icError, s.icError)
+		hasErrored = true
 		return fmt.Errorf("get daemon client: %w", err)
 	}
 
 	_, err = s.login(ctx, true)
 	if err != nil {
+		hasErrored = true
 		return fmt.Errorf("login: %w", err)
 	}
 
@@ -835,6 +844,7 @@ func (s *serviceClient) menuUpClick(ctx context.Context) error {
 	}
 
 	if _, err := conn.Up(ctx, &proto.UpRequest{}); err != nil {
+		hasErrored = true
 		return fmt.Errorf("start connection: %w", err)
 	}
 
@@ -843,15 +853,25 @@ func (s *serviceClient) menuUpClick(ctx context.Context) error {
 
 func (s *serviceClient) menuDownClick() error {
 	s.animator.Start()
-	defer s.animator.Stop()
+
+	var hasErrored bool
+	defer func() {
+		if hasErrored {
+			s.animator.Stop()
+			s.connecting = false
+			systray.SetTemplateIcon(s.icError, s.icError)
+		}
+	}()
 
 	conn, err := s.getSrvClient(defaultFailTimeout)
 	if err != nil {
+		hasErrored = true
 		return fmt.Errorf("get daemon client: %w", err)
 	}
 
 	status, err := conn.Status(s.ctx, &proto.StatusRequest{})
 	if err != nil {
+		hasErrored = true
 		return fmt.Errorf("get status: %w", err)
 	}
 
@@ -860,6 +880,7 @@ func (s *serviceClient) menuDownClick() error {
 	}
 
 	if _, err := conn.Down(s.ctx, &proto.DownRequest{}); err != nil {
+		hasErrored = true
 		return fmt.Errorf("stop connection: %w", err)
 	}
 
