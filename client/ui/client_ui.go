@@ -812,9 +812,10 @@ func (s *serviceClient) handleSSOLogin(ctx context.Context, loginResp *proto.Log
 
 func (s *serviceClient) menuUpClick(ctx context.Context) error {
 	s.animator.Start()
+	defer s.animator.Stop()
+
 	conn, err := s.getSrvClient(defaultFailTimeout)
 	if err != nil {
-		s.animator.Stop()
 		systray.SetTemplateIcon(s.icError, s.icError)
 		return fmt.Errorf("get daemon client: %w", err)
 	}
@@ -842,6 +843,8 @@ func (s *serviceClient) menuUpClick(ctx context.Context) error {
 
 func (s *serviceClient) menuDownClick() error {
 	s.animator.Start()
+	defer s.animator.Stop()
+
 	conn, err := s.getSrvClient(defaultFailTimeout)
 	if err != nil {
 		return fmt.Errorf("get daemon client: %w", err)
@@ -879,6 +882,7 @@ func (s *serviceClient) updateStatus() error {
 			return err
 		}
 
+		// Lock held during state transitions and syncDaemonVersionAndIcon call
 		s.updateIndicationLock.Lock()
 		defer s.updateIndicationLock.Unlock()
 
@@ -886,7 +890,6 @@ func (s *serviceClient) updateStatus() error {
 		if status.Status == string(internal.StatusSessionExpired) {
 			s.onSessionExpire()
 		}
-
 
 		switch {
 		case status.Status == string(internal.StatusConnected) && !s.connected:
@@ -897,9 +900,9 @@ func (s *serviceClient) updateStatus() error {
 			s.setDisconnectedStatus()
 		}
 
-		// the updater struct notify by the upgrades available only, but if meanwhile the daemon has successfully
-		// updated must reset the mUpdate visibility state
-		s.updateDaemonVersion(status)
+		// Sync daemon version display and icon state. The update checker only notifies when
+		// updates are available, so we need to reset the icon if the daemon has been updated.
+		s.syncDaemonVersionAndIcon(status)
 
 		return nil
 	}, &backoff.ExponentialBackOff{
@@ -918,7 +921,11 @@ func (s *serviceClient) updateStatus() error {
 	return nil
 }
 
-func (s *serviceClient) updateDaemonVersion(status *proto.StatusResponse) {
+// syncDaemonVersionAndIcon synchronizes the daemon version display and connection icon state.
+// When the daemon version changes, this updates the version menu items and resets the systray
+// icon to reflect the current connection state (unless an update is available or connecting).
+// Must be called with updateIndicationLock held.
+func (s *serviceClient) syncDaemonVersionAndIcon(status *proto.StatusResponse) {
 	if s.daemonVersion == status.DaemonVersion {
 		return
 	}
@@ -949,6 +956,8 @@ func (s *serviceClient) updateDaemonVersion(status *proto.StatusResponse) {
 	}
 }
 
+// setDisconnectedStatus updates UI to disconnected state.
+// Assumes updateIndicationLock is held by caller.
 func (s *serviceClient) setDisconnectedStatus() {
 	s.animator.Stop()
 	s.connected = false
@@ -968,6 +977,8 @@ func (s *serviceClient) setDisconnectedStatus() {
 	go s.updateExitNodes()
 }
 
+// setConnectedStatus updates UI to connected state.
+// Assumes updateIndicationLock is held by caller.
 func (s *serviceClient) setConnectedStatus() {
 	s.animator.Stop()
 	s.connected = true
@@ -987,6 +998,8 @@ func (s *serviceClient) setConnectedStatus() {
 	go s.updateExitNodes()
 }
 
+// setConnectingStatus updates UI to connecting state.
+// Assumes updateIndicationLock is held by caller.
 func (s *serviceClient) setConnectingStatus() {
 	s.animator.Start()
 	s.connected = false
@@ -1515,7 +1528,7 @@ func (s *serviceClient) onUpdateAvailable() {
 	if s.connected {
 		systray.SetTemplateIcon(s.icUpdateConnected, s.icUpdateConnected)
 	} else {
-		systray.SetTemplateIcon(s.icUpdateConnected, s.icUpdateDisconnected)
+		systray.SetTemplateIcon(s.icUpdateDisconnected, s.icUpdateDisconnected)
 	}
 }
 

@@ -5,6 +5,7 @@ package animation
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,6 +25,7 @@ type Animator struct {
 	ctx          context.Context
 	state        atomic.Pointer[state]
 	frames       map[string][]byte
+	framesMu     sync.RWMutex
 	animationIdx atomic.Int32
 	numOfFrames  int32
 	frameRate    time.Duration
@@ -77,7 +79,12 @@ func (a *Animator) Start() {
 				idx := (a.animationIdx.Load() % a.numOfFrames) + 1
 				a.animationIdx.Store(idx)
 				frameKey := fmt.Sprintf("frame%d", idx)
-				systray.SetTemplateIcon(a.frames[frameKey], a.frames[frameKey])
+
+				a.framesMu.RLock()
+				frame := a.frames[frameKey]
+				a.framesMu.RUnlock()
+
+				systray.SetTemplateIcon(frame, frame)
 			}
 		}
 	}()
@@ -106,7 +113,10 @@ func (a *Animator) UpdateFrames(frames map[string][]byte) {
 		return
 	}
 
+	a.framesMu.Lock()
 	a.frames = frames
 	a.numOfFrames = int32(len(frames))
+	a.framesMu.Unlock()
+
 	a.animationIdx.Store(0)
 }
