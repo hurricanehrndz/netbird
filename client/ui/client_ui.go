@@ -918,25 +918,6 @@ func (s *serviceClient) updateStatus() error {
 	return nil
 }
 
-func (s *serviceClient) setDisconnectedStatus() {
-	s.animator.Stop()
-	s.connected = false
-	s.connecting = false
-	if s.isUpdateIconActive {
-		systray.SetTemplateIcon(s.icUpdateDisconnected, s.icUpdateDisconnected)
-	} else {
-		systray.SetTemplateIcon(s.icDisconnected, s.icDisconnected)
-	}
-	systray.SetTooltip("NetBird (Disconnected)")
-	s.mStatus.SetTitle("Disconnected")
-	s.mStatus.SetIcon(s.icDisconnectedDot)
-	s.mDown.Disable()
-	s.mUp.Enable()
-	s.mNetworks.Disable()
-	s.mExitNode.Disable()
-	go s.updateExitNodes()
-}
-
 func (s *serviceClient) updateDaemonVersion(status *proto.StatusResponse) {
 	if s.daemonVersion == status.DaemonVersion {
 		return
@@ -966,6 +947,25 @@ func (s *serviceClient) updateDaemonVersion(status *proto.StatusResponse) {
 	} else {
 		systray.SetTemplateIcon(s.icDisconnected, s.icDisconnected)
 	}
+}
+
+func (s *serviceClient) setDisconnectedStatus() {
+	s.animator.Stop()
+	s.connected = false
+	s.connecting = false
+	if s.isUpdateIconActive {
+		systray.SetTemplateIcon(s.icUpdateDisconnected, s.icUpdateDisconnected)
+	} else {
+		systray.SetTemplateIcon(s.icDisconnected, s.icDisconnected)
+	}
+	systray.SetTooltip("NetBird (Disconnected)")
+	s.mStatus.SetTitle("Disconnected")
+	s.mStatus.SetIcon(s.icDisconnectedDot)
+	s.mDown.Disable()
+	s.mUp.Enable()
+	s.mNetworks.Disable()
+	s.mExitNode.Disable()
+	go s.updateExitNodes()
 }
 
 func (s *serviceClient) setConnectedStatus() {
