@@ -868,7 +868,6 @@ func (s *serviceClient) updateStatus() error {
 			s.onSessionExpire()
 		}
 
-		var systrayIconState bool
 
 		switch {
 		case status.Status == string(internal.StatusConnected):
@@ -878,29 +877,11 @@ func (s *serviceClient) updateStatus() error {
 			s.setConnectingStatus()
 		case status.Status != string(internal.StatusConnected) && s.mUp.Disabled():
 			s.setDisconnectedStatus()
-			systrayIconState = false
 		}
 
 		// the updater struct notify by the upgrades available only, but if meanwhile the daemon has successfully
 		// updated must reset the mUpdate visibility state
-		if s.daemonVersion != status.DaemonVersion {
-			s.mUpdate.Hide()
-			s.daemonVersion = status.DaemonVersion
-
-			s.isUpdateIconActive = s.update.SetDaemonVersion(status.DaemonVersion)
-			if !s.isUpdateIconActive {
-				if systrayIconState {
-					systray.SetTemplateIcon(s.icConnected, s.icConnected)
-				} else {
-					systray.SetTemplateIcon(s.icDisconnected, s.icDisconnected)
-				}
-			}
-
-			daemonVersionTitle := normalizedVersion(s.daemonVersion)
-			s.mVersionDaemon.SetTitle(fmt.Sprintf("Daemon: %s", daemonVersionTitle))
-			s.mVersionDaemon.SetTooltip(fmt.Sprintf("Daemon version: %s", daemonVersionTitle))
-			s.mVersionDaemon.Show()
-		}
+		s.updateDaemonVersion(status)
 
 		return nil
 	}, &backoff.ExponentialBackOff{
@@ -934,6 +915,37 @@ func (s *serviceClient) setDisconnectedStatus() {
 	s.mNetworks.Disable()
 	s.mExitNode.Disable()
 	go s.updateExitNodes()
+}
+
+func (s *serviceClient) updateDaemonVersion(status *proto.StatusResponse) {
+	if s.daemonVersion == status.DaemonVersion {
+		return
+	}
+
+	s.mUpdate.Hide()
+	s.daemonVersion = status.DaemonVersion
+
+	s.isUpdateIconActive = s.update.SetDaemonVersion(status.DaemonVersion)
+
+	daemonVersionTitle := normalizedVersion(s.daemonVersion)
+	s.mVersionDaemon.SetTitle(fmt.Sprintf("Daemon: %s", daemonVersionTitle))
+	s.mVersionDaemon.SetTooltip(fmt.Sprintf("Daemon version: %s", daemonVersionTitle))
+	s.mVersionDaemon.Show()
+
+	if s.connecting {
+		return
+	}
+
+	if s.isUpdateIconActive {
+		// reset not required
+		return
+	}
+
+	if s.connected {
+		systray.SetTemplateIcon(s.icConnected, s.icConnected)
+	} else {
+		systray.SetTemplateIcon(s.icDisconnected, s.icDisconnected)
+	}
 }
 
 func (s *serviceClient) setConnectedStatus() {
