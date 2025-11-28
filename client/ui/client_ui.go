@@ -889,9 +889,9 @@ func (s *serviceClient) updateStatus() error {
 
 
 		switch {
-		case status.Status == string(internal.StatusConnected):
+		case status.Status == string(internal.StatusConnected) && !s.connected:
 			s.setConnectedStatus()
-		case status.Status == string(internal.StatusConnecting):
+		case status.Status == string(internal.StatusConnecting) && !s.connecting:
 			s.setConnectingStatus()
 		case status.Status != string(internal.StatusConnected) && s.mUp.Disabled():
 			s.setDisconnectedStatus()
@@ -921,6 +921,7 @@ func (s *serviceClient) updateStatus() error {
 func (s *serviceClient) setDisconnectedStatus() {
 	s.animator.Stop()
 	s.connected = false
+	s.connecting = false
 	if s.isUpdateIconActive {
 		systray.SetTemplateIcon(s.icUpdateDisconnected, s.icUpdateDisconnected)
 	} else {
@@ -970,6 +971,7 @@ func (s *serviceClient) updateDaemonVersion(status *proto.StatusResponse) {
 func (s *serviceClient) setConnectedStatus() {
 	s.animator.Stop()
 	s.connected = true
+	s.connecting = false
 	s.sendNotification = true
 	if s.isUpdateIconActive {
 		systray.SetTemplateIcon(s.icUpdateConnected, s.icUpdateConnected)
@@ -986,8 +988,9 @@ func (s *serviceClient) setConnectedStatus() {
 }
 
 func (s *serviceClient) setConnectingStatus() {
-	s.connected = false
 	s.animator.Start()
+	s.connected = false
+	s.connecting = true
 	systray.SetTooltip("NetBird (Connecting)")
 	s.mStatus.SetTitle("Connecting")
 	s.mUp.Disable()
