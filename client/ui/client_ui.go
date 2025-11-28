@@ -40,6 +40,7 @@ import (
 	"github.com/netbirdio/netbird/client/internal/profilemanager"
 	"github.com/netbirdio/netbird/client/internal/sleep"
 	"github.com/netbirdio/netbird/client/proto"
+	"github.com/netbirdio/netbird/client/ui/animation"
 	"github.com/netbirdio/netbird/client/ui/desktop"
 	"github.com/netbirdio/netbird/client/ui/event"
 	"github.com/netbirdio/netbird/client/ui/process"
@@ -57,6 +58,11 @@ const (
 const (
 	censoredPreSharedKey = "**********"
 	maxSSHJWTCacheTTL    = 86_400 // 24 hours in seconds
+)
+
+var (
+	iconsConnectingFrames     = map[string][]byte{"frame1": iconConnectingFrame1, "frame2": iconConnectingFrame2, "frame3": iconConnectingFrame3, "frame4": iconConnectingFrame4}
+	iconsConnectingDarkFrames = map[string][]byte{"frame1": iconConnectingDarkFrame1, "frame2": iconConnectingDarkFrame2, "frame3": iconConnectingDarkFrame3, "frame4": iconConnectingDarkFrame4}
 )
 
 func main() {
@@ -278,6 +284,7 @@ type serviceClient struct {
 	sshJWTCacheTTL             int
 
 	connected            bool
+	connecting           bool
 	update               *version.Update
 	daemonVersion        string
 	updateIndicationLock sync.Mutex
@@ -288,6 +295,7 @@ type serviceClient struct {
 	wQuickActions        fyne.Window
 
 	eventManager *event.Manager
+	animator     *animation.Animator
 
 	exitNodeMu           sync.Mutex
 	mExitNodeItems       []menuHandler
@@ -338,6 +346,7 @@ func newServiceClient(args *newServiceClientArgs) *serviceClient {
 
 	s.eventHandler = newEventHandler(s)
 	s.profileManager = profilemanager.NewProfileManager()
+	s.animator = animation.New(ctx, iconsConnectingFrames)
 	s.setNewIcons()
 
 	switch {
@@ -369,6 +378,7 @@ func (s *serviceClient) setNewIcons() {
 		s.icUpdateDisconnected = iconUpdateDisconnectedDark
 		s.icConnecting = iconConnectingDark
 		s.icError = iconErrorDark
+		s.animator.UpdateFrames(iconsConnectingDarkFrames)
 	} else {
 		s.icConnected = iconConnected
 		s.icDisconnected = iconDisconnected
@@ -376,26 +386,34 @@ func (s *serviceClient) setNewIcons() {
 		s.icUpdateDisconnected = iconUpdateDisconnected
 		s.icConnecting = iconConnecting
 		s.icError = iconError
+		s.animator.UpdateFrames(iconsConnectingFrames)
 	}
 }
 
 func (s *serviceClient) updateIcon() {
 	s.setNewIcons()
 	s.updateIndicationLock.Lock()
-	if s.connected {
-		if s.isUpdateIconActive {
-			systray.SetTemplateIcon(s.icUpdateConnected, s.icUpdateConnected)
-		} else {
-			systray.SetTemplateIcon(s.icConnected, s.icConnected)
-		}
-	} else {
+	defer s.updateIndicationLock.Unlock()
+
+	// connected/disconnected events will update icon
+	if !s.connecting {
+		return
+	}
+
+	if !s.connected {
 		if s.isUpdateIconActive {
 			systray.SetTemplateIcon(s.icUpdateDisconnected, s.icUpdateDisconnected)
 		} else {
 			systray.SetTemplateIcon(s.icDisconnected, s.icDisconnected)
 		}
+		return
 	}
-	s.updateIndicationLock.Unlock()
+
+	if s.isUpdateIconActive {
+		systray.SetTemplateIcon(s.icUpdateConnected, s.icUpdateConnected)
+	} else {
+		systray.SetTemplateIcon(s.icConnected, s.icConnected)
+	}
 }
 
 func (s *serviceClient) showSettingsUI() {
@@ -793,9 +811,10 @@ func (s *serviceClient) handleSSOLogin(ctx context.Context, loginResp *proto.Log
 }
 
 func (s *serviceClient) menuUpClick(ctx context.Context) error {
-	systray.SetTemplateIcon(s.icConnecting, s.icConnecting)
+	s.animator.Start()
 	conn, err := s.getSrvClient(defaultFailTimeout)
 	if err != nil {
+		s.animator.Stop()
 		systray.SetTemplateIcon(s.icError, s.icError)
 		return fmt.Errorf("get daemon client: %w", err)
 	}
@@ -822,7 +841,7 @@ func (s *serviceClient) menuUpClick(ctx context.Context) error {
 }
 
 func (s *serviceClient) menuDownClick() error {
-	systray.SetTemplateIcon(s.icConnecting, s.icConnecting)
+	s.animator.Start()
 	conn, err := s.getSrvClient(defaultFailTimeout)
 	if err != nil {
 		return fmt.Errorf("get daemon client: %w", err)
@@ -872,7 +891,6 @@ func (s *serviceClient) updateStatus() error {
 		switch {
 		case status.Status == string(internal.StatusConnected):
 			s.setConnectedStatus()
-			systrayIconState = true
 		case status.Status == string(internal.StatusConnecting):
 			s.setConnectingStatus()
 		case status.Status != string(internal.StatusConnected) && s.mUp.Disabled():
@@ -901,6 +919,7 @@ func (s *serviceClient) updateStatus() error {
 }
 
 func (s *serviceClient) setDisconnectedStatus() {
+	s.animator.Stop()
 	s.connected = false
 	if s.isUpdateIconActive {
 		systray.SetTemplateIcon(s.icUpdateDisconnected, s.icUpdateDisconnected)
@@ -949,6 +968,7 @@ func (s *serviceClient) updateDaemonVersion(status *proto.StatusResponse) {
 }
 
 func (s *serviceClient) setConnectedStatus() {
+	s.animator.Stop()
 	s.connected = true
 	s.sendNotification = true
 	if s.isUpdateIconActive {
@@ -967,7 +987,7 @@ func (s *serviceClient) setConnectedStatus() {
 
 func (s *serviceClient) setConnectingStatus() {
 	s.connected = false
-	systray.SetTemplateIcon(s.icConnecting, s.icConnecting)
+	s.animator.Start()
 	systray.SetTooltip("NetBird (Connecting)")
 	s.mStatus.SetTitle("Connecting")
 	s.mUp.Disable()
@@ -1483,6 +1503,11 @@ func (s *serviceClient) onUpdateAvailable() {
 
 	s.mUpdate.Show()
 	s.isUpdateIconActive = true
+
+	// connected/disconnected event will set icon
+	if s.connecting {
+		return
+	}
 
 	if s.connected {
 		systray.SetTemplateIcon(s.icUpdateConnected, s.icUpdateConnected)
