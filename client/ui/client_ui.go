@@ -1269,6 +1269,17 @@ func (s *serviceClient) handleSleepEvents(event sleep.EventType) {
 	case sleep.EventTypeWakeUp:
 		log.Infof("handle wakeup event: %v", event)
 		req.Type = proto.OSLifecycleRequest_WAKEUP
+		// conn.Up blocks for up to 50s (daemon mutex blocks Status() calls), so set UI state now
+		s.setConnectingStatus()
+		_, err = conn.Up(s.ctx, &proto.UpRequest{})
+		if err != nil {
+			s.animator.Stop()
+			s.connecting = false
+			systray.SetTemplateIcon(s.icError, s.icError)
+			log.Errorf("up service: %v", err)
+			return
+		}
+		return
 	case sleep.EventTypeSleep:
 		log.Infof("handle sleep event: %v", event)
 		req.Type = proto.OSLifecycleRequest_SLEEP
