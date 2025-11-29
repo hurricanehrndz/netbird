@@ -912,12 +912,14 @@ func (s *serviceClient) updateStatus() error {
 			s.onSessionExpire()
 		}
 
+		currentStatus := internal.StatusType(status.Status)
+
 		switch {
-		case status.Status == string(internal.StatusConnected) && !s.connected:
+		case currentStatus == internal.StatusConnected && !s.connected:
 			s.setConnectedStatus()
-		case status.Status == string(internal.StatusConnecting) && !s.connecting:
+		case currentStatus == internal.StatusConnecting:
 			s.setConnectingStatus()
-		case status.Status != string(internal.StatusConnected) && s.mUp.Disabled():
+		case currentStatus != internal.StatusConnected && s.mUp.Disabled():
 			s.setDisconnectedStatus()
 		}
 
@@ -980,6 +982,7 @@ func (s *serviceClient) syncDaemonVersionAndIcon(status *proto.StatusResponse) {
 // setDisconnectedStatus updates UI to disconnected state.
 // Assumes updateIndicationLock is held by caller.
 func (s *serviceClient) setDisconnectedStatus() {
+	log.Info("setting status to disconnected...")
 	s.animator.Stop()
 	s.connected = false
 	s.connecting = false
@@ -1001,6 +1004,7 @@ func (s *serviceClient) setDisconnectedStatus() {
 // setConnectedStatus updates UI to connected state.
 // Assumes updateIndicationLock is held by caller.
 func (s *serviceClient) setConnectedStatus() {
+	log.Info("setting status to connected...")
 	s.animator.Stop()
 	s.connected = true
 	s.connecting = false
@@ -1022,6 +1026,7 @@ func (s *serviceClient) setConnectedStatus() {
 // setConnectingStatus updates UI to connecting state.
 // Assumes updateIndicationLock is held by caller.
 func (s *serviceClient) setConnectingStatus() {
+	log.Info("setting status to connecting...")
 	s.animator.Start()
 	s.connected = false
 	s.connecting = true
@@ -1035,18 +1040,15 @@ func (s *serviceClient) setConnectingStatus() {
 
 func (s *serviceClient) statusUpdateLoop() {
 	s.getSrvConfig()
-	time.Sleep(100 * time.Millisecond)
+	responseDelay := 100 * time.Millisecond // Delay to allow system/server to respond before updating
+	time.Sleep(responseDelay)               // To prevent race condition caused by systray not being fully initialized and ignoring setIcon
+
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		case <-s.updateStatusChan:
-		case <-ticker.C:
-		}
+	var responseDelayTimer *time.Timer
 
+	op := func() {
 		err := s.updateStatus()
 		if err != nil {
 			log.Errorf("error while updating status: %v", err)
@@ -1054,9 +1056,31 @@ func (s *serviceClient) statusUpdateLoop() {
 
 		s.checkAndUpdateFeatures()
 	}
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			if responseDelayTimer != nil {
+				responseDelayTimer.Stop()
+			}
+			return
+		case <-s.updateStatusChan:
+			if responseDelayTimer != nil {
+				responseDelayTimer.Stop()
+			}
+			responseDelayTimer = time.AfterFunc(responseDelay, func() {
+				op()
+			})
+			continue
+		case <-ticker.C:
+		}
+
+		op()
+	}
 }
 
 func (s *serviceClient) triggerStatusUpdate() {
+	log.Info("trigger status update")
 	select {
 	case s.updateStatusChan <- struct{}{}:
 	default:
@@ -1264,6 +1288,7 @@ func (s *serviceClient) handleSleepEvents(event sleep.EventType) {
 	}
 
 	req := &proto.OSLifecycleRequest{}
+	defer s.triggerStatusUpdate()
 
 	switch event {
 	case sleep.EventTypeWakeUp:
