@@ -75,6 +75,8 @@ var (
 	profilesDisabled        bool
 	updateSettingsDisabled  bool
 
+	delayConnectedStatusUntilDNS bool
+
 	rootCmd = &cobra.Command{
 		Use:          "netbird",
 		Short:        "",

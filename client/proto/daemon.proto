@@ -711,6 +711,7 @@ message GetFeaturesRequest{}
 message GetFeaturesResponse{
   bool disable_profiles = 1;
   bool disable_update_settings = 2;
+  bool delay_connected_status_until_dns = 3;
 }
 
 // GetPeerSSHHostKeyRequest for retrieving SSH host key for a specific peer

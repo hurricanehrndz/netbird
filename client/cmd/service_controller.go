@@ -61,7 +61,13 @@ func (p *program) Start(svc service.Service) error {
 			}
 		}
 
-		serverInstance := server.New(p.ctx, util.FindFirstLogPath(logFiles), configPath, profilesDisabled, updateSettingsDisabled)
+		serverInstance := server.New(p.ctx, server.ServerConfig{
+			LogFile:                      util.FindFirstLogPath(logFiles),
+			ConfigFile:                   configPath,
+			ProfilesDisabled:             profilesDisabled,
+			UpdateSettingsDisabled:       updateSettingsDisabled,
+			DelayConnectedStatusUntilDNS: delayConnectedStatusUntilDNS,
+		})
 		if err := serverInstance.Start(); err != nil {
 			log.Fatalf("failed to start daemon: %v", err)
 		}

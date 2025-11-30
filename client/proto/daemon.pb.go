@@ -4921,11 +4921,12 @@ func (*GetFeaturesRequest) Descriptor() ([]byte, []int) {
 }
 
 type GetFeaturesResponse struct {
-	state                 protoimpl.MessageState `protogen:"open.v1"`
-	DisableProfiles       bool                   `protobuf:"varint,1,opt,name=disable_profiles,json=disableProfiles,proto3" json:"disable_profiles,omitempty"`
-	DisableUpdateSettings bool                   `protobuf:"varint,2,opt,name=disable_update_settings,json=disableUpdateSettings,proto3" json:"disable_update_settings,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	state                        protoimpl.MessageState `protogen:"open.v1"`
+	DisableProfiles              bool                   `protobuf:"varint,1,opt,name=disable_profiles,json=disableProfiles,proto3" json:"disable_profiles,omitempty"`
+	DisableUpdateSettings        bool                   `protobuf:"varint,2,opt,name=disable_update_settings,json=disableUpdateSettings,proto3" json:"disable_update_settings,omitempty"`
+	DelayConnectedStatusUntilDns bool                   `protobuf:"varint,3,opt,name=delay_connected_status_until_dns,json=delayConnectedStatusUntilDns,proto3" json:"delay_connected_status_until_dns,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *GetFeaturesResponse) Reset() {
@@ -4968,6 +4969,13 @@ func (x *GetFeaturesResponse) GetDisableProfiles() bool {
 func (x *GetFeaturesResponse) GetDisableUpdateSettings() bool {
 	if x != nil {
 		return x.DisableUpdateSettings
+	}
+	return false
+}
+
+func (x *GetFeaturesResponse) GetDelayConnectedStatusUntilDns() bool {
+	if x != nil {
+		return x.DelayConnectedStatusUntilDns
 	}
 	return false
 }
@@ -5859,10 +5867,11 @@ const file_daemon_proto_rawDesc = "" +
 	"\f_profileNameB\v\n" +
 	"\t_username\"\x10\n" +
 	"\x0eLogoutResponse\"\x14\n" +
-	"\x12GetFeaturesRequest\"x\n" +
+	"\x12GetFeaturesRequest\"\xc0\x01\n" +
 	"\x13GetFeaturesResponse\x12)\n" +
 	"\x10disable_profiles\x18\x01 \x01(\bR\x0fdisableProfiles\x126\n" +
-	"\x17disable_update_settings\x18\x02 \x01(\bR\x15disableUpdateSettings\"<\n" +
+	"\x17disable_update_settings\x18\x02 \x01(\bR\x15disableUpdateSettings\x12F\n" +
+	" delay_connected_status_until_dns\x18\x03 \x01(\bR\x1cdelayConnectedStatusUntilDns\"<\n" +
 	"\x18GetPeerSSHHostKeyRequest\x12 \n" +
 	"\vpeerAddress\x18\x01 \x01(\tR\vpeerAddress\"\x85\x01\n" +
 	"\x19GetPeerSSHHostKeyResponse\x12\x1e\n" +

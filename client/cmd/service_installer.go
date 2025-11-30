@@ -59,6 +59,10 @@ func buildServiceArguments() []string {
 		args = append(args, "--disable-update-settings")
 	}
 
+	if delayConnectedStatusUntilDNS {
+		args = append(args, "--delay-connected-status-until-dns")
+	}
+
 	return args
 }
 

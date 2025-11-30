@@ -81,9 +81,10 @@ type Server struct {
 	persistSyncResponse bool
 	isSessionActive     atomic.Bool
 
-	profileManager         *profilemanager.ServiceManager
-	profilesDisabled       bool
-	updateSettingsDisabled bool
+	profileManager               *profilemanager.ServiceManager
+	profilesDisabled             bool
+	updateSettingsDisabled       bool
+	delayConnectedStatusUntilDNS bool
 
 	// sleepTriggeredDown holds a state indicated if the sleep handler triggered the last client down
 	sleepTriggeredDown atomic.Bool
@@ -98,17 +99,26 @@ type oauthAuthFlow struct {
 	waitCancel context.CancelFunc
 }
 
+type ServerConfig struct {
+	LogFile                      string
+	ConfigFile                   string
+	ProfilesDisabled             bool
+	UpdateSettingsDisabled       bool
+	DelayConnectedStatusUntilDNS bool
+}
+
 // New server instance constructor.
-func New(ctx context.Context, logFile string, configFile string, profilesDisabled bool, updateSettingsDisabled bool) *Server {
+func New(ctx context.Context, config ServerConfig) *Server {
 	return &Server{
-		rootCtx:                ctx,
-		logFile:                logFile,
-		persistSyncResponse:    true,
-		statusRecorder:         peer.NewRecorder(""),
-		profileManager:         profilemanager.NewServiceManager(configFile),
-		profilesDisabled:       profilesDisabled,
-		updateSettingsDisabled: updateSettingsDisabled,
-		jwtCache:               newJWTCache(),
+		rootCtx:                      ctx,
+		logFile:                      config.LogFile,
+		persistSyncResponse:          true,
+		statusRecorder:               peer.NewRecorder(""),
+		profileManager:               profilemanager.NewServiceManager(config.ConfigFile),
+		profilesDisabled:             config.ProfilesDisabled,
+		updateSettingsDisabled:       config.UpdateSettingsDisabled,
+		delayConnectedStatusUntilDNS: config.DelayConnectedStatusUntilDNS,
+		jwtCache:                     newJWTCache(),
 	}
 }
 
@@ -345,7 +355,6 @@ func (s *Server) SetConfig(callerCtx context.Context, msg *proto.SetConfigReques
 
 	if msg.CleanDNSLabels {
 		config.DNSLabels = domain.List{}
-
 	} else if msg.DnsLabels != nil {
 		dnsLabels := domain.FromPunycodeList(msg.DnsLabels)
 		config.DNSLabels = dnsLabels
@@ -1359,7 +1368,7 @@ func (s *Server) GetConfig(ctx context.Context, req *proto.GetConfigRequest) (*p
 	managementURL := cfg.ManagementURL
 	adminURL := cfg.AdminURL
 
-	var preSharedKey = cfg.PreSharedKey
+	preSharedKey := cfg.PreSharedKey
 	if preSharedKey != "" {
 		preSharedKey = "**********"
 	}
@@ -1530,8 +1539,9 @@ func (s *Server) GetFeatures(ctx context.Context, msg *proto.GetFeaturesRequest)
 	defer s.mutex.Unlock()
 
 	features := &proto.GetFeaturesResponse{
-		DisableProfiles:       s.checkProfilesDisabled(),
-		DisableUpdateSettings: s.checkUpdateSettingsDisabled(),
+		DisableProfiles:              s.checkProfilesDisabled(),
+		DisableUpdateSettings:        s.checkUpdateSettingsDisabled(),
+		DelayConnectedStatusUntilDns: s.checkDelayConnectedStatusUntilDNS(),
 	}
 
 	return features, nil
@@ -1563,6 +1573,10 @@ func (s *Server) checkUpdateSettingsDisabled() bool {
 	}
 
 	return false
+}
+
+func (s *Server) checkDelayConnectedStatusUntilDNS() bool {
+	return s.delayConnectedStatusUntilDNS
 }
 
 func (s *Server) onSessionExpire() {

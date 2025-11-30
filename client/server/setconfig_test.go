@@ -53,7 +53,9 @@ func TestSetConfig_AllFieldsSaved(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	s := New(ctx, "console", "", false, false)
+	s := New(ctx, ServerConfig{
+		LogFile: "console",
+	})
 
 	rosenpassEnabled := true
 	rosenpassPermissive := true
