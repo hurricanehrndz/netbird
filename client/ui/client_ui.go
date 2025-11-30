@@ -37,6 +37,7 @@ import (
 
 	"github.com/netbirdio/netbird/client/iface"
 	"github.com/netbirdio/netbird/client/internal"
+	"github.com/netbirdio/netbird/client/internal/peer"
 	"github.com/netbirdio/netbird/client/internal/profilemanager"
 	"github.com/netbirdio/netbird/client/internal/sleep"
 	"github.com/netbirdio/netbird/client/proto"
@@ -283,16 +284,17 @@ type serviceClient struct {
 	disableSSHAuth             bool
 	sshJWTCacheTTL             int
 
-	connected            bool
-	connecting           bool
-	update               *version.Update
-	daemonVersion        string
-	updateIndicationLock sync.Mutex
-	isUpdateIconActive   bool
-	showNetworks         bool
-	wNetworks            fyne.Window
-	wProfiles            fyne.Window
-	wQuickActions        fyne.Window
+	delayConnectedStatusUntilDNS bool
+	connected                    bool
+	connecting                   bool
+	update                       *version.Update
+	daemonVersion                string
+	updateIndicationLock         sync.Mutex
+	isUpdateIconActive           bool
+	showNetworks                 bool
+	wNetworks                    fyne.Window
+	wProfiles                    fyne.Window
+	wQuickActions                fyne.Window
 
 	eventManager *event.Manager
 	animator     *animation.Animator
@@ -887,7 +889,13 @@ func (s *serviceClient) updateStatus() error {
 		return err
 	}
 	err = backoff.Retry(func() error {
-		status, err := conn.Status(s.ctx, &proto.StatusRequest{})
+		req := &proto.StatusRequest{}
+		if s.delayConnectedStatusUntilDNS {
+			req.GetFullPeerStatus = true;
+			req.ShouldRunProbes = false;
+		}
+
+		status, err := conn.Status(s.ctx, req)
 		if err != nil {
 			log.Errorf("get service status: %v", err)
 			if s.connected {
@@ -907,10 +915,16 @@ func (s *serviceClient) updateStatus() error {
 		}
 
 		currentStatus := internal.StatusType(status.Status)
+		isWaitingForDNS := s.delayConnectedStatusUntilDNS && !isDNSAvaiable(status)
 
 		switch {
 		case currentStatus == internal.StatusConnected && !s.connected:
-			s.setConnectedStatus()
+			if !isWaitingForDNS {
+				s.setConnectedStatus()
+				break
+			}
+			log.Info("delaying connected status until DNS is available")
+			fallthrough
 		case currentStatus == internal.StatusConnecting && !s.connecting:
 			s.setConnectingStatus()
 		case currentStatus != internal.StatusConnected && currentStatus != internal.StatusConnecting && s.mUp.Disabled():
@@ -1155,6 +1169,9 @@ func (s *serviceClient) onTrayReady() {
 		}
 		if features != nil && features.DisableProfiles {
 			s.mProfile.setEnabled(false)
+		}
+		if features != nil && features.DelayConnectedStatusUntilDns {
+			s.delayConnectedStatusUntilDNS = true
 		}
 	}
 
@@ -1854,6 +1871,47 @@ func (s *serviceClient) showLoginURL() context.CancelFunc {
 
 	// return cancel func so callers can stop the background goroutine if desired
 	return cancel
+}
+
+// isDNSAvaiable checks if DNS servers in private address space are reachable
+// through connected routing peers
+func isDNSAvaiable(status *proto.StatusResponse) bool {
+	if status == nil || status.FullStatus == nil {
+		return false
+	}
+
+	if !isPeerConnected(status) {
+		return false
+	}
+
+	for _, nsGroup := range status.FullStatus.GetDnsServers() {
+		// is this the all domains configuration?
+		if nsGroup.Enabled {
+			return true
+		}
+	}
+
+	return false
+}
+
+
+// isPeerConnected is deemed connected when ConnStatus == connected and has routes
+func isPeerConnected(status *proto.StatusResponse) bool {
+	if status == nil || status.FullStatus == nil {
+		return false
+	}
+
+	for _, pbPeerState := range status.FullStatus.Peers {
+		if pbPeerState.ConnStatus != peer.StatusConnected.String() {
+			continue
+		}
+
+		if len(pbPeerState.GetNetworks()) > 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 func openURL(url string) error {
