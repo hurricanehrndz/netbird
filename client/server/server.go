@@ -643,22 +643,23 @@ func (s *Server) WaitSSOLogin(callerCtx context.Context, msg *proto.WaitSSOLogin
 
 // Up starts engine work in the daemon.
 func (s *Server) Up(callerCtx context.Context, msg *proto.UpRequest) (*proto.UpResponse, error) {
+	var unlockOnce sync.Once
+
 	s.mutex.Lock()
+	defer unlockOnce.Do(func() { s.mutex.Unlock() })
+
 	if s.clientRunning {
 		state := internal.CtxGetState(s.rootCtx)
 		status, err := state.Status()
 		if err != nil {
-			s.mutex.Unlock()
 			return nil, err
 		}
 		if status == internal.StatusNeedsLogin {
 			s.actCancel()
 		}
-		s.mutex.Unlock()
-
+		unlockOnce.Do(func() { s.mutex.Unlock() })
 		return s.waitForUp(callerCtx)
 	}
-	defer s.mutex.Unlock()
 
 	if err := restoreResidualState(callerCtx, s.profileManager.GetStatePath()); err != nil {
 		log.Warnf(errRestoreResidualState, err)
@@ -730,6 +731,7 @@ func (s *Server) Up(callerCtx context.Context, msg *proto.UpRequest) (*proto.UpR
 	s.clientGiveUpChan = make(chan struct{})
 	go s.connectWithRetryRuns(ctx, s.config, s.statusRecorder, s.clientRunningChan, s.clientGiveUpChan)
 
+	unlockOnce.Do(func() { s.mutex.Unlock() })
 	return s.waitForUp(callerCtx)
 }
 
