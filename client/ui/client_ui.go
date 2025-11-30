@@ -812,6 +812,7 @@ func (s *serviceClient) handleSSOLogin(ctx context.Context, loginResp *proto.Log
 
 func (s *serviceClient) menuUpClick(ctx context.Context) error {
 	s.animator.Start()
+	s.connecting = true
 
 	var hasErrored bool
 	defer func() {
