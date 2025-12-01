@@ -68,7 +68,7 @@ type Server struct {
 	mutex  sync.Mutex
 	config *profilemanager.Config
 	proto.UnimplementedDaemonServiceServer
-	clientRunning     bool // protected by mutex
+	clientRunning     atomic.Bool
 	clientRunningChan chan struct{}
 	clientGiveUpChan  chan struct{}
 
@@ -113,12 +113,12 @@ func New(ctx context.Context, logFile string, configFile string, profilesDisable
 }
 
 func (s *Server) Start() error {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	if s.clientRunning {
+	if s.clientRunning.Load() {
 		return nil
 	}
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 
 	state := internal.CtxGetState(s.rootCtx)
 
@@ -189,7 +189,7 @@ func (s *Server) Start() error {
 		return nil
 	}
 
-	s.clientRunning = true
+	s.clientRunning.Store(true)
 	s.clientRunningChan = make(chan struct{})
 	s.clientGiveUpChan = make(chan struct{})
 	go s.connectWithRetryRuns(ctx, config, s.statusRecorder, s.clientRunningChan, s.clientGiveUpChan)
@@ -225,9 +225,7 @@ func (s *Server) setDefaultConfigIfNotExists(ctx context.Context) error {
 // we cancel retry if the client receive a stop or down command, or if disable auto connect is configured.
 func (s *Server) connectWithRetryRuns(ctx context.Context, profileConfig *profilemanager.Config, statusRecorder *peer.Status, runningChan chan struct{}, giveUpChan chan struct{}) {
 	defer func() {
-		s.mutex.Lock()
-		s.clientRunning = false
-		s.mutex.Unlock()
+		s.clientRunning.Store(false)
 	}()
 
 	if s.config.DisableAutoConnect {
@@ -645,10 +643,7 @@ func (s *Server) WaitSSOLogin(callerCtx context.Context, msg *proto.WaitSSOLogin
 func (s *Server) Up(callerCtx context.Context, msg *proto.UpRequest) (*proto.UpResponse, error) {
 	var unlockOnce sync.Once
 
-	s.mutex.Lock()
-	defer unlockOnce.Do(func() { s.mutex.Unlock() })
-
-	if s.clientRunning {
+	if s.clientRunning.Load() {
 		state := internal.CtxGetState(s.rootCtx)
 		status, err := state.Status()
 		if err != nil {
@@ -657,9 +652,11 @@ func (s *Server) Up(callerCtx context.Context, msg *proto.UpRequest) (*proto.UpR
 		if status == internal.StatusNeedsLogin {
 			s.actCancel()
 		}
-		unlockOnce.Do(func() { s.mutex.Unlock() })
 		return s.waitForUp(callerCtx)
 	}
+
+	s.mutex.Lock()
+	defer unlockOnce.Do(func() { s.mutex.Unlock() })
 
 	if err := restoreResidualState(callerCtx, s.profileManager.GetStatePath()); err != nil {
 		log.Warnf(errRestoreResidualState, err)
@@ -726,12 +723,13 @@ func (s *Server) Up(callerCtx context.Context, msg *proto.UpRequest) (*proto.UpR
 	s.statusRecorder.UpdateManagementAddress(s.config.ManagementURL.String())
 	s.statusRecorder.UpdateRosenpass(s.config.RosenpassEnabled, s.config.RosenpassPermissive)
 
-	s.clientRunning = true
+	s.clientRunning.Store(true)
 	s.clientRunningChan = make(chan struct{})
 	s.clientGiveUpChan = make(chan struct{})
-	go s.connectWithRetryRuns(ctx, s.config, s.statusRecorder, s.clientRunningChan, s.clientGiveUpChan)
 
 	unlockOnce.Do(func() { s.mutex.Unlock() })
+	go s.connectWithRetryRuns(ctx, s.config, s.statusRecorder, s.clientRunningChan, s.clientGiveUpChan)
+
 	return s.waitForUp(callerCtx)
 }
 
@@ -1025,9 +1023,8 @@ func (s *Server) Status(
 	ctx context.Context,
 	msg *proto.StatusRequest,
 ) (*proto.StatusResponse, error) {
-	s.mutex.Lock()
-	clientRunning := s.clientRunning
-	s.mutex.Unlock()
+	// Try to acquire the lock with a short timeout to avoid blocking the UI
+	clientRunning := s.clientRunning.Load()
 
 	if msg.WaitForReady != nil && *msg.WaitForReady && clientRunning {
 		state := internal.CtxGetState(s.rootCtx)
@@ -1079,8 +1076,17 @@ func (s *Server) Status(
 
 	statusResponse := proto.StatusResponse{Status: string(status), DaemonVersion: version.NetbirdVersion()}
 
-	s.statusRecorder.UpdateManagementAddress(s.config.ManagementURL.String())
-	s.statusRecorder.UpdateRosenpass(s.config.RosenpassEnabled, s.config.RosenpassPermissive)
+	// Try to read config with a quick lock attempt
+	if s.mutex.TryLock() {
+		if s.config != nil {
+			s.statusRecorder.UpdateManagementAddress(s.config.ManagementURL.String())
+			s.statusRecorder.UpdateRosenpass(s.config.RosenpassEnabled, s.config.RosenpassPermissive)
+		}
+		s.mutex.Unlock()
+	} else {
+		// If we can't get the lock, skip updating these fields to avoid blocking
+		log.Debug("Status() couldn't acquire lock for config update, skipping")
+	}
 
 	if msg.GetFullPeerStatus {
 		s.runProbes(msg.ShouldRunProbes)
