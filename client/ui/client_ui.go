@@ -811,15 +811,12 @@ func (s *serviceClient) handleSSOLogin(ctx context.Context, loginResp *proto.Log
 }
 
 func (s *serviceClient) menuUpClick(ctx context.Context) error {
-	s.animator.Start()
-	s.connecting = true
+	s.setConnectingStatus()
 
 	var hasErrored bool
 	defer func() {
 		if hasErrored {
-			s.animator.Stop()
-			s.connecting = false
-			systray.SetTemplateIcon(s.icError, s.icError)
+			s.setErrorStatus("failed to connect")
 		}
 	}()
 
@@ -853,14 +850,10 @@ func (s *serviceClient) menuUpClick(ctx context.Context) error {
 }
 
 func (s *serviceClient) menuDownClick() error {
-	s.animator.Start()
-
 	var hasErrored bool
 	defer func() {
 		if hasErrored {
-			s.animator.Stop()
-			s.connecting = false
-			systray.SetTemplateIcon(s.icError, s.icError)
+			s.setErrorStatus("failed to disconnect")
 		}
 	}()
 
@@ -978,6 +971,23 @@ func (s *serviceClient) syncDaemonVersionAndIcon(status *proto.StatusResponse) {
 	} else {
 		systray.SetTemplateIcon(s.icDisconnected, s.icDisconnected)
 	}
+}
+
+// setErrorStatus updates UI to Error state.
+func (s *serviceClient) setErrorStatus(msg string) {
+	log.Info("setting status to error...")
+	s.animator.Stop()
+	s.connecting = false
+
+	systray.SetTemplateIcon(s.icError, s.icError)
+	systray.SetTooltip(fmt.Sprintf("Netbird (%s)", msg))
+
+	s.mStatus.SetTitle("Error")
+	s.mStatus.SetIcon(s.icDisconnectedDot)
+
+	s.mNetworks.Disable()
+	s.mExitNode.Disable()
+	go s.updateExitNodes()
 }
 
 // setDisconnectedStatus updates UI to disconnected state.
@@ -1299,9 +1309,7 @@ func (s *serviceClient) handleSleepEvents(event sleep.EventType) {
 		s.setConnectingStatus()
 		_, err = conn.Up(s.ctx, &proto.UpRequest{})
 		if err != nil {
-			s.animator.Stop()
-			s.connecting = false
-			systray.SetTemplateIcon(s.icError, s.icError)
+			s.setErrorStatus("failed to re-connect after sleep")
 			log.Errorf("up service: %v", err)
 			return
 		}
