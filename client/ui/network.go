@@ -336,6 +336,10 @@ func (s *serviceClient) updateNetworksBasedOnDisplayTab(tabs *container.AppTabs,
 }
 
 func (s *serviceClient) updateExitNodes() {
+	if !s.connected {
+		return
+	}
+
 	conn, err := s.getSrvClient(defaultFailTimeout)
 	if err != nil {
 		log.Errorf("get client: %v", err)
