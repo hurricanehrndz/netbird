@@ -913,7 +913,7 @@ func (s *serviceClient) updateStatus() error {
 			s.setConnectedStatus()
 		case currentStatus == internal.StatusConnecting && !s.connecting:
 			s.setConnectingStatus()
-		case currentStatus != internal.StatusConnected && s.mUp.Disabled():
+		case currentStatus != internal.StatusConnected && currentStatus != internal.StatusConnecting && s.mUp.Disabled():
 			s.setDisconnectedStatus()
 		}
 
