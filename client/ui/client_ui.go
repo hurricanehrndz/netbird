@@ -911,7 +911,7 @@ func (s *serviceClient) updateStatus() error {
 		switch {
 		case currentStatus == internal.StatusConnected && !s.connected:
 			s.setConnectedStatus()
-		case currentStatus == internal.StatusConnecting:
+		case currentStatus == internal.StatusConnecting && !s.connecting:
 			s.setConnectingStatus()
 		case currentStatus != internal.StatusConnected && s.mUp.Disabled():
 			s.setDisconnectedStatus()
