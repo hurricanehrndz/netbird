@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"net/url"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -420,8 +421,10 @@ func (s *DefaultServer) UpdateDNSServer(serial uint64, update nbdns.Config) erro
 }
 
 func (s *DefaultServer) SearchDomains() []string {
-	var searchDomains []string
+	s.mux.Lock()
+	defer s.mux.Unlock()
 
+	var searchDomains []string
 	for _, dConf := range s.currentConfig.Domains {
 		if dConf.Disabled {
 			continue
@@ -559,6 +562,56 @@ func (s *DefaultServer) enableDNS() error {
 	s.hostManager = hostManager
 
 	return nil
+}
+
+// rebuildCurrentConfigFromHandlers rebuilds s.currentConfig based on the currently
+// registered handlers in s.dnsMuxMap. This ensures that s.currentConfig accurately
+// reflects which domains are active vs disabled after handlers are deactivated/reactivated.
+// The caller must hold s.mux lock.
+func (s *DefaultServer) rebuildCurrentConfigFromHandlers() {
+	// Get active upstream domains from handlerChain (source of truth)
+	activeDomainsSlice := s.handlerChain.GetUpstreamDomains()
+	activeUpstreamDomains := make(map[string]bool)
+	for _, domain := range activeDomainsSlice {
+		activeUpstreamDomains[domain] = true
+	}
+
+	log.Debugf("rebuildCurrentConfigFromHandlers: found %d active upstream domains in handlerChain: %v",
+		len(activeUpstreamDomains), activeDomainsSlice)
+
+	// Update RouteAll based on root zone handler presence
+	oldRouteAll := s.currentConfig.RouteAll
+	s.currentConfig.RouteAll = activeUpstreamDomains[nbdns.RootZone]
+	if oldRouteAll != s.currentConfig.RouteAll {
+		log.Infof("RouteAll changed: %v -> %v", oldRouteAll, s.currentConfig.RouteAll)
+	}
+
+	// Rebuild Domains list: keep all domains but update their Disabled status
+	// We need to preserve the original domain list (including custom zones) but
+	// mark domains as disabled if they don't have active handlers
+	var enabledDomains, disabledDomains []string
+	for i := range s.currentConfig.Domains {
+		domain := s.currentConfig.Domains[i].Domain
+		wasDisabled := s.currentConfig.Domains[i].Disabled
+		// Domain is enabled if it has an active handler in dnsMuxMap
+		s.currentConfig.Domains[i].Disabled = !activeUpstreamDomains[domain]
+
+		if s.currentConfig.Domains[i].Disabled && !wasDisabled {
+			disabledDomains = append(disabledDomains, domain)
+		} else if !s.currentConfig.Domains[i].Disabled && wasDisabled {
+			enabledDomains = append(enabledDomains, domain)
+		}
+	}
+
+	if len(disabledDomains) > 0 {
+		log.Infof("Disabled %d domains (no active handlers): %v", len(disabledDomains), disabledDomains)
+	}
+	if len(enabledDomains) > 0 {
+		log.Infof("Re-enabled %d domains (handlers restored): %v", len(enabledDomains), enabledDomains)
+	}
+	if len(disabledDomains) == 0 && len(enabledDomains) == 0 {
+		log.Debugf("No domain status changes (all domains already in correct state)")
+	}
 }
 
 func (s *DefaultServer) applyHostConfig() {
@@ -844,13 +897,12 @@ func (s *DefaultServer) updateMux(muxUpdates []handlerWrapper) {
 
 // upstreamCallbacks returns two functions, the first one is used to deactivate
 // the upstream resolver from the configuration, the second one is used to
-// reactivate it. Not allowed to call reactivate before deactivate.
+// reactivate it. Both functions are independent and can be called in any order.
 func (s *DefaultServer) upstreamCallbacks(
 	nsGroup *nbdns.NameServerGroup,
 	handler dns.Handler,
 	priority int,
 ) (deactivate func(error), reactivate func()) {
-	var removeIndex map[string]int
 	deactivate = func(err error) {
 		s.mux.Lock()
 		defer s.mux.Unlock()
@@ -858,23 +910,20 @@ func (s *DefaultServer) upstreamCallbacks(
 		l := log.WithField("nameservers", nsGroup.NameServers)
 		l.Info("Temporarily deactivating nameservers group due to timeout")
 
-		removeIndex = make(map[string]int)
-		for _, domain := range nsGroup.Domains {
-			removeIndex[domain] = -1
-		}
 		if nsGroup.Primary {
-			removeIndex[nbdns.RootZone] = -1
-			s.currentConfig.RouteAll = false
 			s.deregisterHandler([]string{nbdns.RootZone}, priority)
 		}
 
-		for i, item := range s.currentConfig.Domains {
-			if _, found := removeIndex[item.Domain]; found {
-				s.currentConfig.Domains[i].Disabled = true
+		for _, item := range s.currentConfig.Domains {
+			// Convert FQDN to raw domain name for comparison with nsGroup.Domains
+			rawDomain := strings.TrimSuffix(item.Domain, ".")
+			if slices.Contains(nsGroup.Domains, rawDomain) {
 				s.deregisterHandler([]string{item.Domain}, priority)
-				removeIndex[item.Domain] = i
 			}
 		}
+
+		// Rebuild currentConfig to reflect the deregistered handlers
+		s.rebuildCurrentConfigFromHandlers()
 
 		s.applyHostConfig()
 
@@ -895,21 +944,23 @@ func (s *DefaultServer) upstreamCallbacks(
 		s.mux.Lock()
 		defer s.mux.Unlock()
 
-		for domain, i := range removeIndex {
-			if i == -1 || i >= len(s.currentConfig.Domains) || s.currentConfig.Domains[i].Domain != domain {
-				continue
-			}
-			s.currentConfig.Domains[i].Disabled = false
-			s.registerHandler([]string{domain}, handler, priority)
-		}
-
 		l := log.WithField("nameservers", nsGroup.NameServers)
-		l.Debug("reactivate temporary disabled nameserver group")
+		l.Debug("Reactivating nameservers group")
+
+		for _, item := range s.currentConfig.Domains {
+			// Convert FQDN to raw domain name for comparison with nsGroup.Domains
+			rawDomain := strings.TrimSuffix(item.Domain, ".")
+			if slices.Contains(nsGroup.Domains, rawDomain) {
+				s.registerHandler([]string{item.Domain}, handler, priority)
+			}
+		}
 
 		if nsGroup.Primary {
-			s.currentConfig.RouteAll = true
 			s.registerHandler([]string{nbdns.RootZone}, handler, priority)
 		}
+
+		// Rebuild currentConfig to reflect the reregistered handlers
+		s.rebuildCurrentConfigFromHandlers()
 
 		s.applyHostConfig()
 

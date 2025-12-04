@@ -125,6 +125,19 @@ func (c *HandlerChain) findHandlerPosition(newEntry HandlerEntry) int {
 	return len(c.handlers)
 }
 
+// GetUpstreamDomains returns all domains currently registered in the handler chain
+// Returns domains with their original patterns (e.g., "corp.yelpcorp.com.")
+func (c *HandlerChain) GetUpstreamDomains() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var domains []string
+	for _, entry := range c.handlers {
+		domains = append(domains, entry.OrigPattern)
+	}
+	return domains
+}
+
 // RemoveHandler removes a handler for the given pattern and priority
 func (c *HandlerChain) RemoveHandler(pattern string, priority int) {
 	c.mu.Lock()
