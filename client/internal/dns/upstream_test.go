@@ -131,10 +131,11 @@ func TestUpstreamResolver_DeactivationReactivation(t *testing.T) {
 	}
 
 	resolver := &upstreamResolverBase{
-		ctx:              context.TODO(),
-		upstreamClient:   mockClient,
-		upstreamTimeout:  UpstreamTimeout,
-		reactivatePeriod: time.Microsecond * 100,
+		ctx:             context.TODO(),
+		upstreamClient:  mockClient,
+		upstreamTimeout: UpstreamTimeout,
+		failsTillDeact:  failsTillDeact,
+		probeInterval:   time.Microsecond * 100,
 	}
 	addrPort, _ := netip.ParseAddrPort("0.0.0.0:1") // Use valid port for parsing, test will still fail on connection
 	resolver.upstreamServers = []netip.AddrPort{netip.AddrPortFrom(addrPort.Addr().Unmap(), addrPort.Port())}

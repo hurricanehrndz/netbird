@@ -15,7 +15,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
 	"github.com/hashicorp/go-multierror"
 	"github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
@@ -33,13 +32,14 @@ func SetCurrentMTU(mtu uint16) {
 }
 
 const (
-	UpstreamTimeout = 4 * time.Second
+	UpstreamTimeout = 2 * time.Second
 	// ClientTimeout is the timeout for the dns.Client.
 	// Set longer than UpstreamTimeout to ensure context timeout takes precedence
-	ClientTimeout = 5 * time.Second
+	ClientTimeout = 3 * time.Second
 
-	reactivatePeriod = 30 * time.Second
-	probeTimeout     = 2 * time.Second
+	failsTillDeact = int32(3)
+	probeInterval  = 5 * time.Second
+	probeTimeout   = 2 * time.Second
 )
 
 const testRecord = "com."
@@ -54,16 +54,18 @@ type UpstreamResolver interface {
 }
 
 type upstreamResolverBase struct {
-	ctx              context.Context
-	cancel           context.CancelFunc
-	upstreamClient   upstreamClient
-	upstreamServers  []netip.AddrPort
-	domain           string
-	disabled         bool
-	successCount     atomic.Int32
-	mutex            sync.Mutex
-	reactivatePeriod time.Duration
-	upstreamTimeout  time.Duration
+	ctx             context.Context
+	cancel          context.CancelFunc
+	upstreamClient  upstreamClient
+	upstreamServers []netip.AddrPort
+	domain          string
+	disabled        bool
+	successCount    atomic.Int32
+	failsCount      atomic.Int32
+	mutex           sync.Mutex
+	failsTillDeact  int32
+	probeInterval   time.Duration
+	upstreamTimeout time.Duration
 
 	deactivate     func(error)
 	reactivate     func()
@@ -74,12 +76,13 @@ func newUpstreamResolverBase(ctx context.Context, statusRecorder *peer.Status, d
 	ctx, cancel := context.WithCancel(ctx)
 
 	return &upstreamResolverBase{
-		ctx:              ctx,
-		cancel:           cancel,
-		domain:           domain,
-		upstreamTimeout:  UpstreamTimeout,
-		reactivatePeriod: reactivatePeriod,
-		statusRecorder:   statusRecorder,
+		ctx:             ctx,
+		cancel:          cancel,
+		domain:          domain,
+		upstreamTimeout: UpstreamTimeout,
+		failsTillDeact:  failsTillDeact,
+		probeInterval:   probeInterval,
+		statusRecorder:  statusRecorder,
 	}
 }
 
@@ -125,11 +128,39 @@ func (u *upstreamResolverBase) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		return
 	}
 
+	var allFailed bool
+	defer func() {
+		if allFailed {
+			u.checkUpstreamFails()
+		}
+	}()
+
 	if u.tryUpstreamServers(w, r, logger) {
 		return
 	}
 
+	allFailed = true
 	u.writeErrorResponse(w, r, logger)
+}
+
+func (u *upstreamResolverBase) checkUpstreamFails() {
+	if u.failsCount.Load() < u.failsTillDeact {
+		return
+	}
+
+	u.disable(fmt.Errorf("upstream servers failed %d consecutive times", u.failsTillDeact))
+
+	if u.statusRecorder == nil {
+		return
+	}
+
+	u.statusRecorder.PublishEvent(
+		proto.SystemEvent_WARNING,
+		proto.SystemEvent_DNS,
+		"All upstream servers failed (consecutive failures)",
+		"Unable to reach one or more DNS servers. This might affect your ability to connect to some services.",
+		map[string]string{"upstreams": u.upstreamServersString()},
+	)
 }
 
 func (u *upstreamResolverBase) prepareRequest(r *dns.Msg) {
@@ -144,18 +175,17 @@ func (u *upstreamResolverBase) tryUpstreamServers(w dns.ResponseWriter, r *dns.M
 		maxTotal := 5 * time.Second
 		minPerUpstream := 2 * time.Second
 		scaledTimeout := maxTotal / time.Duration(len(u.upstreamServers))
-		if scaledTimeout > minPerUpstream {
-			timeout = scaledTimeout
-		} else {
-			timeout = minPerUpstream
-		}
+		timeout = max(scaledTimeout, minPerUpstream)
 	}
 
 	for _, upstream := range u.upstreamServers {
 		if u.queryUpstream(w, r, upstream, timeout, logger) {
+			u.failsCount.Store(0)
 			return true
 		}
 	}
+
+	u.failsCount.Add(1)
 	return false
 }
 
@@ -232,8 +262,8 @@ func (u *upstreamResolverBase) ProbeAvailability() {
 	default:
 	}
 
-	// avoid probe if upstreams could resolve at least one query
-	if u.successCount.Load() > 0 {
+	// avoid probe if upstreams could resolve at least one query and haven't reached failure threshold
+	if u.successCount.Load() > 0 && u.failsCount.Load() < u.failsTillDeact {
 		return
 	}
 
@@ -281,48 +311,32 @@ func (u *upstreamResolverBase) ProbeAvailability() {
 	}
 }
 
-// waitUntilResponse retries, in an exponential interval, querying the upstream servers until it gets a positive response
+// waitUntilResponse probes upstream servers at fixed intervals until one responds
 func (u *upstreamResolverBase) waitUntilResponse() {
-	exponentialBackOff := &backoff.ExponentialBackOff{
-		InitialInterval:     500 * time.Millisecond,
-		RandomizationFactor: 0.5,
-		Multiplier:          1.1,
-		MaxInterval:         u.reactivatePeriod,
-		MaxElapsedTime:      0,
-		Stop:                backoff.Stop,
-		Clock:               backoff.SystemClock,
-	}
+	ticker := time.NewTicker(u.probeInterval)
+	defer ticker.Stop()
 
-	operation := func() error {
+	for {
 		select {
 		case <-u.ctx.Done():
-			return backoff.Permanent(fmt.Errorf("exiting upstream retry loop for upstreams %s: parent context has been canceled", u.upstreamServersString()))
-		default:
-		}
-
-		for _, upstream := range u.upstreamServers {
-			if err := u.testNameserver(upstream, probeTimeout); err != nil {
-				log.Tracef("upstream check for %s: %s", upstream, err)
-			} else {
-				// at least one upstream server is available, stop probing
-				return nil
+			log.Debugf("exiting upstream retry loop for upstreams %s: parent context has been canceled", u.upstreamServersString())
+			return
+		case <-ticker.C:
+			for _, upstream := range u.upstreamServers {
+				if err := u.testNameserver(upstream, probeTimeout); err != nil {
+					log.Tracef("upstream check for %s: %s", upstream, err)
+				} else {
+					log.Infof("upstreams %s are responsive again. Adding them back to system", u.upstreamServersString())
+					u.failsCount.Store(0)
+					u.successCount.Add(1)
+					u.reactivate()
+					u.disabled = false
+					return
+				}
 			}
+			log.Tracef("checking connectivity with upstreams %s failed. Retrying in %s", u.upstreamServersString(), u.probeInterval)
 		}
-
-		log.Tracef("checking connectivity with upstreams %s failed. Retrying in %s", u.upstreamServersString(), exponentialBackOff.NextBackOff())
-		return fmt.Errorf("upstream check call error")
 	}
-
-	err := backoff.Retry(operation, exponentialBackOff)
-	if err != nil {
-		log.Warn(err)
-		return
-	}
-
-	log.Infof("upstreams %s are responsive again. Adding them back to system", u.upstreamServersString())
-	u.successCount.Add(1)
-	u.reactivate()
-	u.disabled = false
 }
 
 // isTimeout returns true if the given error is a network timeout error.
@@ -341,7 +355,7 @@ func (u *upstreamResolverBase) disable(err error) {
 		return
 	}
 
-	log.Warnf("Upstream resolving is Disabled for %v", reactivatePeriod)
+	log.Warnf("Upstream resolving is disabled, will probe every %v", u.probeInterval)
 	u.successCount.Store(0)
 	u.deactivate(err)
 	u.disabled = true
