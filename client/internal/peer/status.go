@@ -851,6 +851,20 @@ func (d *Status) GetLazyConnection() bool {
 	return d.lazyConnectionEnabled
 }
 
+// GetConnectedPeersCount returns the number of peers with ConnStatus == StatusConnected
+func (d *Status) GetConnectedPeersCount() int {
+	d.mux.Lock()
+	defer d.mux.Unlock()
+
+	count := 0
+	for _, peerState := range d.peers {
+		if peerState.ConnStatus == StatusConnected {
+			count++
+		}
+	}
+	return count
+}
+
 func (d *Status) GetManagementState() ManagementState {
 	d.mux.Lock()
 	defer d.mux.Unlock()

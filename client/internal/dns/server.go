@@ -488,6 +488,8 @@ func (s *DefaultServer) applyConfiguration(update nbdns.Config) error {
 		return fmt.Errorf("local handler updater: %w", err)
 	}
 
+	s.disablePrivateDNSWithoutPeers(update.NameServerGroups)
+
 	upstreamMuxUpdates, err := s.buildUpstreamHandlerUpdate(update.NameServerGroups)
 	if err != nil {
 		return fmt.Errorf("upstream handler updater: %w", err)
@@ -634,6 +636,30 @@ func (s *DefaultServer) registerFallback(config HostDNSConfig) {
 	handler.reactivate = func() { /* always active */ }
 
 	s.registerHandler([]string{nbdns.RootZone}, handler, PriorityFallback)
+}
+
+// disablePrivateDNSWithoutPeers disables nameserver groups that contain only private DNS servers
+// when no peers are connected. Public DNS servers (e.g., 8.8.8.8) are always enabled since they
+// don't require NetBird network connectivity. Private DNS servers (e.g., 10.0.0.1) require at
+// least one connected peer to be reachable.
+func (s *DefaultServer) disablePrivateDNSWithoutPeers(nameServerGroups []*nbdns.NameServerGroup) {
+	peerCount := s.statusRecorder.GetConnectedPeersCount()
+
+	for _, nsGroup := range nameServerGroups {
+		var hasPublicNameServer bool
+		for _, ns := range nsGroup.NameServers {
+			if !ns.IP.IsPrivate() {
+				hasPublicNameServer = true
+				break
+			}
+		}
+
+		nsGroup.Enabled = hasPublicNameServer || (peerCount >= 1)
+
+		if !nsGroup.Enabled {
+			log.Debugf("disabling nameserver group %s (no public DNS and no connected peers)", nsGroup.ID)
+		}
+	}
 }
 
 func (s *DefaultServer) buildLocalHandlerUpdate(customZones []nbdns.CustomZone) ([]handlerWrapper, []nbdns.SimpleRecord, error) {

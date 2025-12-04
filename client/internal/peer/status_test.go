@@ -247,3 +247,64 @@ func TestGetFullStatus(t *testing.T) {
 	assert.Equal(t, signalState, fullStatus.SignalState, "signal status should be equal")
 	assert.ElementsMatch(t, []State{peerState1, peerState2}, fullStatus.Peers, "peers states should match")
 }
+
+func TestGetConnectedPeersCount(t *testing.T) {
+	status := NewRecorder("https://mgm")
+
+	// Initially no peers
+	count := status.GetConnectedPeersCount()
+	assert.Equal(t, 0, count, "should have 0 connected peers initially")
+
+	// Add peers
+	_ = status.AddPeer("peer1", "peer1.netbird", "100.64.0.1")
+	_ = status.AddPeer("peer2", "peer2.netbird", "100.64.0.2")
+	_ = status.AddPeer("peer3", "peer3.netbird", "100.64.0.3")
+
+	// Still no connected peers (all are StatusIdle by default)
+	count = status.GetConnectedPeersCount()
+	assert.Equal(t, 0, count, "should have 0 connected peers after adding")
+
+	// Connect peer1
+	_ = status.UpdatePeerState(State{
+		PubKey:           "peer1",
+		ConnStatus:       StatusConnected,
+		ConnStatusUpdate: time.Now(),
+		Mux:              new(sync.RWMutex),
+	})
+
+	count = status.GetConnectedPeersCount()
+	assert.Equal(t, 1, count, "should have 1 connected peer")
+
+	// Connect peer2
+	_ = status.UpdatePeerState(State{
+		PubKey:           "peer2",
+		ConnStatus:       StatusConnected,
+		ConnStatusUpdate: time.Now(),
+		Mux:              new(sync.RWMutex),
+	})
+
+	count = status.GetConnectedPeersCount()
+	assert.Equal(t, 2, count, "should have 2 connected peers")
+
+	// Disconnect peer1
+	_ = status.UpdatePeerState(State{
+		PubKey:           "peer1",
+		ConnStatus:       StatusIdle,
+		ConnStatusUpdate: time.Now(),
+		Mux:              new(sync.RWMutex),
+	})
+
+	count = status.GetConnectedPeersCount()
+	assert.Equal(t, 1, count, "should have 1 connected peer after disconnect")
+
+	// Set peer3 to connecting (not connected)
+	_ = status.UpdatePeerState(State{
+		PubKey:           "peer3",
+		ConnStatus:       StatusConnecting,
+		ConnStatusUpdate: time.Now(),
+		Mux:              new(sync.RWMutex),
+	})
+
+	count = status.GetConnectedPeersCount()
+	assert.Equal(t, 1, count, "should still have 1 connected peer (connecting doesn't count)")
+}
