@@ -918,6 +918,9 @@ func (s *serviceClient) updateStatus() error {
 		isWaitingForDNS := s.delayConnectedStatusUntilDNS && !isDNSAvaiable(status)
 
 		switch {
+		case isWaitingForDNS && s.connected:
+			log.Info("lost connection to DNS servers")
+			fallthrough
 		case currentStatus == internal.StatusConnected && !s.connected:
 			if !isWaitingForDNS {
 				s.setConnectedStatus()
