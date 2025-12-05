@@ -153,10 +153,12 @@ func TestUpdateDNSServer(t *testing.T) {
 					{
 						Domains:     []string{"netbird.io"},
 						NameServers: nameServers,
+						Enabled:     true,
 					},
 					{
 						NameServers: nameServers,
 						Primary:     true,
+						Enabled:     true,
 					},
 				},
 			},
@@ -203,6 +205,7 @@ func TestUpdateDNSServer(t *testing.T) {
 					{
 						Domains:     []string{"netbird.io"},
 						NameServers: nameServers,
+						Enabled:     true,
 					},
 				},
 			},
@@ -289,6 +292,7 @@ func TestUpdateDNSServer(t *testing.T) {
 					{
 						NameServers: nameServers,
 						Primary:     true,
+						Enabled:     true,
 					},
 				},
 			},
@@ -539,10 +543,12 @@ func TestDNSFakeResolverHandleUpdates(t *testing.T) {
 			{
 				Domains:     []string{"netbird.io"},
 				NameServers: nameServers,
+				Enabled:     true,
 			},
 			{
 				NameServers: nameServers,
 				Primary:     true,
+				Enabled:     true,
 			},
 		},
 	}
@@ -883,6 +889,7 @@ func TestDNSPermanent_matchOnly(t *testing.T) {
 				},
 				Domains: []string{"google.com"},
 				Primary: false,
+				Enabled: true,
 			},
 		},
 	}
@@ -1673,6 +1680,7 @@ func TestExtraDomains(t *testing.T) {
 								Port:   53,
 							},
 						},
+						Enabled: true,
 					},
 				},
 			},
@@ -2003,6 +2011,7 @@ func TestLocalResolverPriorityInServer(t *testing.T) {
 						Port:   53,
 					},
 				},
+				Enabled: true,
 			},
 		},
 	}
