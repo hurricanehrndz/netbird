@@ -306,7 +306,8 @@ type serviceClient struct {
 	logFile              string
 	wLoginURL            fyne.Window
 
-	connectCancel    context.CancelFunc
+	connectCancel context.CancelFunc
+
 	updateStatusChan chan struct{}
 }
 
