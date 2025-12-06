@@ -171,20 +171,56 @@ func (u *upstreamResolverBase) prepareRequest(r *dns.Msg) {
 
 func (u *upstreamResolverBase) tryUpstreamServers(w dns.ResponseWriter, r *dns.Msg, logger *log.Entry) bool {
 	timeout := u.upstreamTimeout
-	if len(u.upstreamServers) > 1 {
-		maxTotal := 5 * time.Second
-		minPerUpstream := 2 * time.Second
-		scaledTimeout := maxTotal / time.Duration(len(u.upstreamServers))
-		timeout = max(scaledTimeout, minPerUpstream)
+
+	// Fan-out: query all upstreams concurrently and use first successful response
+	type result struct {
+		msg       *dns.Msg
+		upstream  netip.AddrPort
+		duration  time.Duration
+		startTime time.Time
+		err       error
 	}
 
+	resultCh := make(chan result, len(u.upstreamServers))
+	ctx, cancel := context.WithTimeout(u.ctx, timeout)
+	defer cancel()
+
+	// Launch concurrent queries to all upstreams
 	for _, upstream := range u.upstreamServers {
-		if u.queryUpstream(w, r, upstream, timeout, logger) {
-			u.failsCount.Store(0)
-			return true
-		}
+		go func(up netip.AddrPort) {
+			startTime := time.Now()
+			rm, t, err := u.upstreamClient.exchange(ctx, up.String(), r)
+			resultCh <- result{
+				msg:       rm,
+				upstream:  up,
+				duration:  t,
+				startTime: startTime,
+				err:       err,
+			}
+		}(upstream)
 	}
 
+	// Wait for first successful response or all failures
+	for i := 0; i < len(u.upstreamServers); i++ {
+		res := <-resultCh
+
+		if res.err != nil {
+			u.handleUpstreamError(res.err, res.upstream, r.Question[0].Name, res.startTime, timeout, logger)
+			continue
+		}
+
+		if res.msg == nil || !res.msg.Response {
+			logger.Warnf("no response from upstream %s for question domain=%s", res.upstream, r.Question[0].Name)
+			continue
+		}
+
+		// Got a successful response - cancel remaining queries and return
+		cancel()
+		u.failsCount.Store(0)
+		return u.writeSuccessResponse(w, res.msg, res.upstream, r.Question[0].Name, res.duration, logger)
+	}
+
+	// All upstreams failed
 	u.failsCount.Add(1)
 	return false
 }
