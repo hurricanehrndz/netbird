@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/netip"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -140,38 +141,38 @@ func TestUpstreamResolver_DeactivationReactivation(t *testing.T) {
 	addrPort, _ := netip.ParseAddrPort("0.0.0.0:1") // Use valid port for parsing, test will still fail on connection
 	resolver.upstreamServers = []netip.AddrPort{netip.AddrPortFrom(addrPort.Addr().Unmap(), addrPort.Port())}
 
-	failed := false
+	var failed atomic.Bool
 	resolver.deactivate = func(error) {
-		failed = true
+		failed.Store(true)
 		// After deactivation, make the mock client work again
 		mockClient.err = nil
 	}
 
-	reactivated := false
+	var reactivated atomic.Bool
 	resolver.reactivate = func() {
-		reactivated = true
+		reactivated.Store(true)
 	}
 
 	resolver.ProbeAvailability()
 
-	if !failed {
+	if !failed.Load() {
 		t.Errorf("expected that resolving was deactivated")
 		return
 	}
 
-	if !resolver.disabled {
+	if !resolver.disabled.Load() {
 		t.Errorf("resolver should be Disabled")
 		return
 	}
 
 	time.Sleep(time.Millisecond * 200)
 
-	if !reactivated {
+	if !reactivated.Load() {
 		t.Errorf("expected that resolving was reactivated")
 		return
 	}
 
-	if resolver.disabled {
+	if resolver.disabled.Load() {
 		t.Errorf("should be enabled")
 	}
 }

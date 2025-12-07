@@ -59,10 +59,9 @@ type upstreamResolverBase struct {
 	upstreamClient  upstreamClient
 	upstreamServers []netip.AddrPort
 	domain          string
-	disabled        bool
+	disabled        atomic.Bool
 	successCount    atomic.Int32
 	failsCount      atomic.Int32
-	mutex           sync.Mutex
 	failsTillDeact  int32
 	probeInterval   time.Duration
 	upstreamTimeout time.Duration
@@ -135,6 +134,10 @@ func (u *upstreamResolverBase) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		}
 	}()
 
+	if u.disabled.Load() {
+		u.writeErrorResponse(w, r, logger)
+	}
+
 	if u.tryUpstreamServers(w, r, logger) {
 		return
 	}
@@ -148,7 +151,9 @@ func (u *upstreamResolverBase) checkUpstreamFails() {
 		return
 	}
 
-	u.disable(fmt.Errorf("upstream servers failed %d consecutive times", u.failsTillDeact))
+	if u.disabled.Load() {
+		return
+	}
 
 	if u.statusRecorder == nil {
 		return
@@ -161,6 +166,8 @@ func (u *upstreamResolverBase) checkUpstreamFails() {
 		"Unable to reach one or more DNS servers. This might affect your ability to connect to some services.",
 		map[string]string{"upstreams": u.upstreamServersString()},
 	)
+
+	u.disable(fmt.Errorf("upstream servers failed %d consecutive times", u.failsTillDeact))
 }
 
 func (u *upstreamResolverBase) prepareRequest(r *dns.Msg) {
@@ -289,9 +296,6 @@ func (u *upstreamResolverBase) writeErrorResponse(w dns.ResponseWriter, r *dns.M
 // ProbeAvailability tests all upstream servers simultaneously and
 // disables the resolver if none work
 func (u *upstreamResolverBase) ProbeAvailability() {
-	u.mutex.Lock()
-	defer u.mutex.Unlock()
-
 	select {
 	case <-u.ctx.Done():
 		return
@@ -366,7 +370,7 @@ func (u *upstreamResolverBase) waitUntilResponse() {
 					u.failsCount.Store(0)
 					u.successCount.Add(1)
 					u.reactivate()
-					u.disabled = false
+					u.disabled.Store(false)
 					return
 				}
 			}
@@ -387,14 +391,14 @@ func isTimeout(err error) bool {
 }
 
 func (u *upstreamResolverBase) disable(err error) {
-	if u.disabled {
+	if u.disabled.Load() {
 		return
 	}
 
 	log.Warnf("Upstream resolving is disabled, will probe every %v", u.probeInterval)
 	u.successCount.Store(0)
 	u.deactivate(err)
-	u.disabled = true
+	u.disabled.Store(true)
 	go u.waitUntilResponse()
 }
 
