@@ -1003,6 +1003,7 @@ func (s *DefaultServer) updateNSGroupStates(groups []*nbdns.NameServerGroup) {
 	for _, group := range groups {
 		var servers []netip.AddrPort
 		var nsError error
+		domains := group.Domains
 
 		if !group.Enabled {
 			nsError = fmt.Errorf("no peers connected")
@@ -1012,10 +1013,14 @@ func (s *DefaultServer) updateNSGroupStates(groups []*nbdns.NameServerGroup) {
 			servers = append(servers, ns.AddrPort())
 		}
 
+		if group.Primary {
+			domains = append(domains, nbdns.RootZone)
+		}
+
 		state := peer.NSGroupState{
 			ID:      generateGroupKey(group),
 			Servers: servers,
-			Domains: group.Domains,
+			Domains: domains,
 			Enabled: group.Enabled,
 			Error:   nsError,
 		}
