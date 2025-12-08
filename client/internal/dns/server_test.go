@@ -686,12 +686,20 @@ func TestDNSServerUpstreamDeactivateCallback(t *testing.T) {
 		return nil
 	}
 
-	deactivate, reactivate := server.upstreamCallbacks(&nbdns.NameServerGroup{
+	nsGroup := &nbdns.NameServerGroup{
 		Domains: []string{"domain1"},
 		NameServers: []nbdns.NameServer{
 			{IP: netip.MustParseAddr("8.8.0.0"), NSType: nbdns.UDPNameServerType, Port: 53},
 		},
-	}, nil, 0)
+	}
+	handler := generateDummyHandler("domain1", nsGroup.NameServers)
+
+	// Register handlers for all domains to match the initial currentConfig state
+	server.registerHandler([]string{"domain0"}, generateDummyHandler("domain0", nsGroup.NameServers), 0)
+	server.registerHandler([]string{"domain1"}, handler, 0)
+	server.registerHandler([]string{"domain2"}, generateDummyHandler("domain2", nsGroup.NameServers), 0)
+
+	deactivate, reactivate := server.upstreamCallbacks(nsGroup, handler, 0)
 
 	deactivate(nil)
 	expected := "domain0,domain2"

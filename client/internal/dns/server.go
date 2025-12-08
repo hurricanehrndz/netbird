@@ -571,9 +571,11 @@ func (s *DefaultServer) enableDNS() error {
 func (s *DefaultServer) rebuildCurrentConfigFromHandlers() {
 	// Get active upstream domains from handlerChain (source of truth)
 	activeDomainsSlice := s.handlerChain.GetUpstreamDomains()
+	// Normalize all domains to lowercase FQDN for consistent comparison
 	activeUpstreamDomains := make(map[string]bool)
 	for _, domain := range activeDomainsSlice {
-		activeUpstreamDomains[domain] = true
+		normalizedDomain := strings.ToLower(dns.Fqdn(domain))
+		activeUpstreamDomains[normalizedDomain] = true
 	}
 
 	log.Debugf("rebuildCurrentConfigFromHandlers: found %d active upstream domains in handlerChain: %v",
@@ -593,8 +595,9 @@ func (s *DefaultServer) rebuildCurrentConfigFromHandlers() {
 	for i := range s.currentConfig.Domains {
 		domain := s.currentConfig.Domains[i].Domain
 		wasDisabled := s.currentConfig.Domains[i].Disabled
-		// Domain is enabled if it has an active handler in dnsMuxMap
-		s.currentConfig.Domains[i].Disabled = !activeUpstreamDomains[domain]
+		// Normalize domain to FQDN for comparison with activeUpstreamDomains
+		normalizedDomain := strings.ToLower(dns.Fqdn(domain))
+		s.currentConfig.Domains[i].Disabled = !activeUpstreamDomains[normalizedDomain]
 
 		if s.currentConfig.Domains[i].Disabled && !wasDisabled {
 			disabledDomains = append(disabledDomains, domain)
