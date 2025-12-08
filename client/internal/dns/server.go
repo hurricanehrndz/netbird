@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"runtime"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -767,6 +769,8 @@ func (s *DefaultServer) buildUpstreamHandlerUpdate(nameServerGroups []*nbdns.Nam
 		}
 	}
 
+	nameServerGroups = dedupNameServerGroups(nameServerGroups)
+
 	groupedNS := groupNSGroupsByDomain(nameServerGroups)
 
 	for _, domainGroup := range groupedNS {
@@ -915,13 +919,13 @@ func (s *DefaultServer) upstreamCallbacks(
 
 		if nsGroup.Primary {
 			s.deregisterHandler([]string{nbdns.RootZone}, priority)
-		}
-
-		for _, item := range s.currentConfig.Domains {
-			// Convert FQDN to raw domain name for comparison with nsGroup.Domains
-			rawDomain := strings.TrimSuffix(item.Domain, ".")
-			if slices.Contains(nsGroup.Domains, rawDomain) {
-				s.deregisterHandler([]string{item.Domain}, priority)
+		} else {
+			for _, item := range s.currentConfig.Domains {
+				// Convert FQDN to raw domain name for comparison with nsGroup.Domains
+				rawDomain := strings.TrimSuffix(item.Domain, ".")
+				if slices.Contains(nsGroup.Domains, rawDomain) {
+					s.deregisterHandler([]string{item.Domain}, priority)
+				}
 			}
 		}
 
@@ -950,16 +954,16 @@ func (s *DefaultServer) upstreamCallbacks(
 		l := log.WithField("nameservers", nsGroup.NameServers)
 		l.Debug("Reactivating nameservers group")
 
-		for _, item := range s.currentConfig.Domains {
-			// Convert FQDN to raw domain name for comparison with nsGroup.Domains
-			rawDomain := strings.TrimSuffix(item.Domain, ".")
-			if slices.Contains(nsGroup.Domains, rawDomain) {
-				s.registerHandler([]string{item.Domain}, handler, priority)
-			}
-		}
-
 		if nsGroup.Primary {
 			s.registerHandler([]string{nbdns.RootZone}, handler, priority)
+		} else {
+			for _, item := range s.currentConfig.Domains {
+				// Convert FQDN to raw domain name for comparison with nsGroup.Domains
+				rawDomain := strings.TrimSuffix(item.Domain, ".")
+				if slices.Contains(nsGroup.Domains, rawDomain) {
+					s.registerHandler([]string{item.Domain}, handler, priority)
+				}
+			}
 		}
 
 		// Rebuild currentConfig to reflect the reregistered handlers
@@ -1054,6 +1058,61 @@ func generateGroupKey(nsGroup *nbdns.NameServerGroup) string {
 }
 
 // groupNSGroupsByDomain groups nameserver groups by their match domains
+func dedupNameServerGroups(nsGroups []*nbdns.NameServerGroup) []*nbdns.NameServerGroup {
+	serverMap := make(map[string]*nbdns.NameServerGroup)
+	var result []*nbdns.NameServerGroup
+
+	for _, group := range nsGroups {
+		key := serversToKey(group.NameServers)
+		if existing, found := serverMap[key]; found {
+			serverMap[key] = mergeNameServerGroups(existing, group)
+		} else {
+			serverMap[key] = group
+		}
+	}
+
+	for _, group := range serverMap {
+		result = append(result, group)
+	}
+
+	return result
+}
+
+func serversToKey(servers []nbdns.NameServer) string {
+	var addrs []string
+	for _, ns := range servers {
+		addrs = append(addrs, ns.IP.String()+":"+strconv.Itoa(ns.Port))
+	}
+	sort.Strings(addrs)
+	return strings.Join(addrs, ",")
+}
+
+func mergeNameServerGroups(a, b *nbdns.NameServerGroup) *nbdns.NameServerGroup {
+	merged := &nbdns.NameServerGroup{
+		ID:                   a.ID,
+		NameServers:          a.NameServers,
+		Primary:              a.Primary || b.Primary,
+		Enabled:              a.Enabled && b.Enabled,
+		SearchDomainsEnabled: a.SearchDomainsEnabled || b.SearchDomainsEnabled,
+	}
+
+	domainSet := make(map[string]struct{})
+	for _, d := range a.Domains {
+		if _, exists := domainSet[d]; !exists {
+			merged.Domains = append(merged.Domains, d)
+			domainSet[d] = struct{}{}
+		}
+	}
+	for _, d := range b.Domains {
+		if _, exists := domainSet[d]; !exists {
+			merged.Domains = append(merged.Domains, d)
+			domainSet[d] = struct{}{}
+		}
+	}
+
+	return merged
+}
+
 func groupNSGroupsByDomain(nsGroups []*nbdns.NameServerGroup) []nsGroupsByDomain {
 	domainMap := make(map[string][]*nbdns.NameServerGroup)
 

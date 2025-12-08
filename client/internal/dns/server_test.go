@@ -2212,3 +2212,205 @@ func TestDNSLoopPrevention(t *testing.T) {
 		})
 	}
 }
+
+func TestDedupNameServerGroups(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []*nbdns.NameServerGroup
+		expected []*nbdns.NameServerGroup
+	}{
+		{
+			name: "duplicate groups with same servers - one primary",
+			input: []*nbdns.NameServerGroup{
+				{
+					Primary: true,
+					Domains: []string{},
+					NameServers: []nbdns.NameServer{
+						{IP: netip.MustParseAddr("10.197.1.7"), Port: 53, NSType: nbdns.UDPNameServerType},
+						{IP: netip.MustParseAddr("10.197.3.7"), Port: 53, NSType: nbdns.UDPNameServerType},
+					},
+				},
+				{
+					Primary: false,
+					Domains: []string{"corp", "dev", "privatelink", "yelpcorp"},
+					NameServers: []nbdns.NameServer{
+						{IP: netip.MustParseAddr("10.197.1.7"), Port: 53, NSType: nbdns.UDPNameServerType},
+						{IP: netip.MustParseAddr("10.197.3.7"), Port: 53, NSType: nbdns.UDPNameServerType},
+					},
+				},
+			},
+			expected: []*nbdns.NameServerGroup{
+				{
+					Primary: true,
+					Domains: []string{"corp", "dev", "privatelink", "yelpcorp"},
+					NameServers: []nbdns.NameServer{
+						{IP: netip.MustParseAddr("10.197.1.7"), Port: 53, NSType: nbdns.UDPNameServerType},
+						{IP: netip.MustParseAddr("10.197.3.7"), Port: 53, NSType: nbdns.UDPNameServerType},
+					},
+				},
+			},
+		},
+		{
+			name: "different servers - no deduplication",
+			input: []*nbdns.NameServerGroup{
+				{
+					Primary:     true,
+					Domains:     []string{},
+					NameServers: []nbdns.NameServer{{IP: netip.MustParseAddr("1.1.1.1"), Port: 53, NSType: nbdns.UDPNameServerType}},
+				},
+				{
+					Primary:     false,
+					Domains:     []string{"example.com"},
+					NameServers: []nbdns.NameServer{{IP: netip.MustParseAddr("8.8.8.8"), Port: 53, NSType: nbdns.UDPNameServerType}},
+				},
+			},
+			expected: []*nbdns.NameServerGroup{
+				{
+					Primary:     true,
+					Domains:     []string{},
+					NameServers: []nbdns.NameServer{{IP: netip.MustParseAddr("1.1.1.1"), Port: 53, NSType: nbdns.UDPNameServerType}},
+				},
+				{
+					Primary:     false,
+					Domains:     []string{"example.com"},
+					NameServers: []nbdns.NameServer{{IP: netip.MustParseAddr("8.8.8.8"), Port: 53, NSType: nbdns.UDPNameServerType}},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := dedupNameServerGroups(tt.input)
+			assert.Equal(t, len(tt.expected), len(result), "number of groups should match")
+			for i := range result {
+				assert.Equal(t, tt.expected[i].Primary, result[i].Primary, "Primary flag should match")
+				assert.ElementsMatch(t, tt.expected[i].Domains, result[i].Domains, "Domains should match")
+				assert.ElementsMatch(t, tt.expected[i].NameServers, result[i].NameServers, "NameServers should match")
+			}
+		})
+	}
+}
+
+func TestServersToKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		servers1 []nbdns.NameServer
+		servers2 []nbdns.NameServer
+		sameKey  bool
+	}{
+		{
+			name: "identical servers same order",
+			servers1: []nbdns.NameServer{
+				{IP: netip.MustParseAddr("1.1.1.1"), Port: 53, NSType: nbdns.UDPNameServerType},
+				{IP: netip.MustParseAddr("8.8.8.8"), Port: 53, NSType: nbdns.UDPNameServerType},
+			},
+			servers2: []nbdns.NameServer{
+				{IP: netip.MustParseAddr("1.1.1.1"), Port: 53, NSType: nbdns.UDPNameServerType},
+				{IP: netip.MustParseAddr("8.8.8.8"), Port: 53, NSType: nbdns.UDPNameServerType},
+			},
+			sameKey: true,
+		},
+		{
+			name: "identical servers different order",
+			servers1: []nbdns.NameServer{
+				{IP: netip.MustParseAddr("1.1.1.1"), Port: 53, NSType: nbdns.UDPNameServerType},
+				{IP: netip.MustParseAddr("8.8.8.8"), Port: 53, NSType: nbdns.UDPNameServerType},
+			},
+			servers2: []nbdns.NameServer{
+				{IP: netip.MustParseAddr("8.8.8.8"), Port: 53, NSType: nbdns.UDPNameServerType},
+				{IP: netip.MustParseAddr("1.1.1.1"), Port: 53, NSType: nbdns.UDPNameServerType},
+			},
+			sameKey: true,
+		},
+		{
+			name: "different IPs",
+			servers1: []nbdns.NameServer{
+				{IP: netip.MustParseAddr("1.1.1.1"), Port: 53, NSType: nbdns.UDPNameServerType},
+			},
+			servers2: []nbdns.NameServer{
+				{IP: netip.MustParseAddr("8.8.8.8"), Port: 53, NSType: nbdns.UDPNameServerType},
+			},
+			sameKey: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key1 := serversToKey(tt.servers1)
+			key2 := serversToKey(tt.servers2)
+			if tt.sameKey {
+				assert.Equal(t, key1, key2, "keys should be identical")
+			} else {
+				assert.NotEqual(t, key1, key2, "keys should be different")
+			}
+		})
+	}
+}
+
+func TestDedupNameServerGroupsPreservesOrder(t *testing.T) {
+	input := []*nbdns.NameServerGroup{
+		{
+			Primary: true,
+			Domains: []string{"yelpcorp", "corp", "dev"},
+			NameServers: []nbdns.NameServer{
+				{IP: netip.MustParseAddr("10.197.1.7"), Port: 53, NSType: nbdns.UDPNameServerType},
+			},
+		},
+		{
+			Primary: false,
+			Domains: []string{"privatelink", "corp", "extra"},
+			NameServers: []nbdns.NameServer{
+				{IP: netip.MustParseAddr("10.197.1.7"), Port: 53, NSType: nbdns.UDPNameServerType},
+			},
+		},
+	}
+
+	result := dedupNameServerGroups(input)
+
+	assert.Equal(t, 1, len(result), "should merge into one group")
+	assert.True(t, result[0].Primary, "merged group should be Primary")
+
+	expectedDomains := []string{"yelpcorp", "corp", "dev", "privatelink", "extra"}
+	assert.Equal(t, expectedDomains, result[0].Domains, "domains should be in order: first group's domains, then second group's new domains")
+}
+
+func TestBuildUpstreamHandlerUpdateDeduplication(t *testing.T) {
+	server := &DefaultServer{
+		ctx:            context.Background(),
+		wgInterface:    &mocWGIface{},
+		service:        NewServiceViaMemory(&mocWGIface{}),
+		localResolver:  local.NewResolver(),
+		handlerChain:   NewHandlerChain(),
+		hostManager:    &noopHostConfigurator{},
+		dnsMuxMap:      make(registeredHandlerMap),
+		statusRecorder: peer.NewRecorder("test"),
+	}
+
+	nsGroups := []*nbdns.NameServerGroup{
+		{
+			Primary: true,
+			Domains: []string{},
+			NameServers: []nbdns.NameServer{
+				{IP: netip.MustParseAddr("10.197.1.7"), Port: 53, NSType: nbdns.UDPNameServerType},
+				{IP: netip.MustParseAddr("10.197.3.7"), Port: 53, NSType: nbdns.UDPNameServerType},
+			},
+			Enabled: true,
+		},
+		{
+			Primary: false,
+			Domains: []string{"corp", "dev", "privatelink", "yelpcorp"},
+			NameServers: []nbdns.NameServer{
+				{IP: netip.MustParseAddr("10.197.1.7"), Port: 53, NSType: nbdns.UDPNameServerType},
+				{IP: netip.MustParseAddr("10.197.3.7"), Port: 53, NSType: nbdns.UDPNameServerType},
+			},
+			Enabled: true,
+		},
+	}
+
+	muxUpdates, err := server.buildUpstreamHandlerUpdate(nsGroups)
+	assert.NoError(t, err)
+
+	assert.Equal(t, 1, len(muxUpdates), "should create only 1 handler (root zone) after deduplication")
+	assert.Equal(t, ".", muxUpdates[0].domain, "handler should be for root zone")
+}
