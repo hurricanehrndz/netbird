@@ -493,9 +493,11 @@ func (s *DefaultServer) applyConfiguration(update nbdns.Config) error {
 		return fmt.Errorf("local handler updater: %w", err)
 	}
 
-	s.disablePrivateDNSWithoutPeers(update.NameServerGroups)
+	nameServerGroups := dedupNameServerGroups(update.NameServerGroups)
 
-	upstreamMuxUpdates, err := s.buildUpstreamHandlerUpdate(update.NameServerGroups)
+	s.disablePrivateDNSWithoutPeers(nameServerGroups)
+
+	upstreamMuxUpdates, err := s.buildUpstreamHandlerUpdate(nameServerGroups)
 	if err != nil {
 		return fmt.Errorf("upstream handler updater: %w", err)
 	}
@@ -528,7 +530,7 @@ func (s *DefaultServer) applyConfiguration(update nbdns.Config) error {
 		s.searchDomainNotifier.onNewSearchDomains(s.SearchDomains())
 	}
 
-	s.updateNSGroupStates(update.NameServerGroups)
+	s.updateNSGroupStates(nameServerGroups)
 
 	return nil
 }
@@ -594,12 +596,21 @@ func (s *DefaultServer) rebuildCurrentConfigFromHandlers() {
 	// We need to preserve the original domain list (including custom zones) but
 	// mark domains as disabled if they don't have active handlers
 	var enabledDomains, disabledDomains []string
+	hasRootZone := activeUpstreamDomains[nbdns.RootZone]
+
 	for i := range s.currentConfig.Domains {
 		domain := s.currentConfig.Domains[i].Domain
 		wasDisabled := s.currentConfig.Domains[i].Disabled
 		// Normalize domain to FQDN for comparison with activeUpstreamDomains
 		normalizedDomain := strings.ToLower(dns.Fqdn(domain))
-		s.currentConfig.Domains[i].Disabled = !activeUpstreamDomains[normalizedDomain]
+
+		// If root zone handler is active, all domains are enabled (root zone handles everything)
+		// Otherwise, domain is enabled only if it has a specific handler
+		if hasRootZone {
+			s.currentConfig.Domains[i].Disabled = false
+		} else {
+			s.currentConfig.Domains[i].Disabled = !activeUpstreamDomains[normalizedDomain]
+		}
 
 		if s.currentConfig.Domains[i].Disabled && !wasDisabled {
 			disabledDomains = append(disabledDomains, domain)
@@ -768,8 +779,6 @@ func (s *DefaultServer) buildUpstreamHandlerUpdate(nameServerGroups []*nbdns.Nam
 			}
 		}
 	}
-
-	nameServerGroups = dedupNameServerGroups(nameServerGroups)
 
 	groupedNS := groupNSGroupsByDomain(nameServerGroups)
 

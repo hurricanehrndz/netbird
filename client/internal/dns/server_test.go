@@ -730,6 +730,73 @@ func TestDNSServerUpstreamDeactivateCallback(t *testing.T) {
 	}
 }
 
+func TestDNSServerUpstreamDeactivateCallbackPrimary(t *testing.T) {
+	hostManager := &mockHostConfigurator{}
+	server := DefaultServer{
+		ctx:           context.Background(),
+		service:       NewServiceViaMemory(&mocWGIface{}),
+		localResolver: local.NewResolver(),
+		handlerChain:  NewHandlerChain(),
+		hostManager:   hostManager,
+		currentConfig: HostDNSConfig{
+			Domains: []DomainConfig{
+				{false, "corp.yelpcorp.com", false},
+				{false, "dev.yelpcorp.com", false},
+				{false, "yelpcorp.com", false},
+			},
+		},
+		statusRecorder: peer.NewRecorder("mgm"),
+	}
+
+	hostManager.applyDNSConfigFunc = func(config HostDNSConfig, statemanager *statemanager.Manager) error {
+		return nil
+	}
+
+	// Primary nameserver group (root zone)
+	nsGroup := &nbdns.NameServerGroup{
+		Primary: true,
+		Domains: []string{"corp", "dev", "yelpcorp"},
+		NameServers: []nbdns.NameServer{
+			{IP: netip.MustParseAddr("10.197.1.7"), NSType: nbdns.UDPNameServerType, Port: 53},
+		},
+	}
+	handler := generateDummyHandler(".", nsGroup.NameServers)
+
+	// Register root zone handler
+	server.registerHandler([]string{nbdns.RootZone}, handler, 1)
+
+	deactivate, reactivate := server.upstreamCallbacks(nsGroup, handler, 1)
+
+	// Test deactivation - should disable all domains when root zone is removed
+	deactivate(nil)
+	domains := []string{}
+	for _, item := range server.currentConfig.Domains {
+		if item.Disabled {
+			continue
+		}
+		domains = append(domains, item.Domain)
+	}
+	got := strings.Join(domains, ",")
+	if got != "" {
+		t.Errorf("expected all domains to be disabled, got %q", got)
+	}
+
+	// Test reactivation - should re-enable all domains when root zone is restored
+	reactivate()
+	expected := "corp.yelpcorp.com,dev.yelpcorp.com,yelpcorp.com"
+	domains = []string{}
+	for _, item := range server.currentConfig.Domains {
+		if item.Disabled {
+			continue
+		}
+		domains = append(domains, item.Domain)
+	}
+	got = strings.Join(domains, ",")
+	if expected != got {
+		t.Errorf("expected domains list: %q, got %q", expected, got)
+	}
+}
+
 func TestDNSPermanent_updateHostDNS_emptyUpstream(t *testing.T) {
 	wgIFace, err := createWgInterfaceWithBind(t)
 	if err != nil {
@@ -2408,7 +2475,10 @@ func TestBuildUpstreamHandlerUpdateDeduplication(t *testing.T) {
 		},
 	}
 
-	muxUpdates, err := server.buildUpstreamHandlerUpdate(nsGroups)
+	// Deduplicate before building handlers (as done in applyConfiguration)
+	dedupedGroups := dedupNameServerGroups(nsGroups)
+
+	muxUpdates, err := server.buildUpstreamHandlerUpdate(dedupedGroups)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 1, len(muxUpdates), "should create only 1 handler (root zone) after deduplication")
