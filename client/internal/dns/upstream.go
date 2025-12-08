@@ -366,11 +366,14 @@ func (u *upstreamResolverBase) waitUntilResponse() {
 				if err := u.testNameserver(upstream, probeTimeout); err != nil {
 					log.Tracef("upstream check for %s: %s", upstream, err)
 				} else {
-					log.Infof("upstreams %s are responsive again. Adding them back to system", u.upstreamServersString())
-					u.failsCount.Store(0)
-					u.successCount.Add(1)
-					u.reactivate()
-					u.disabled.Store(false)
+					// Use CompareAndSwap to ensure only one reactivation happens
+					// even if multiple handlers share the same upstreams
+					if u.disabled.CompareAndSwap(true, false) {
+						log.Infof("upstreams %s are responsive again. Adding them back to system", u.upstreamServersString())
+						u.failsCount.Store(0)
+						u.successCount.Add(1)
+						u.reactivate()
+					}
 					return
 				}
 			}
